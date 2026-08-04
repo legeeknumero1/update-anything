@@ -1,0 +1,37 @@
+#compdef update-anything
+# Zsh completion for update-anything.
+# Install location (auto-detected by install.sh): a directory already on $fpath.
+
+_arguments \
+  '(-y --yes)'{-y,--yes}'[Skip this script'"'"'s own confirmation prompts]' \
+  '(-c --check)'{-c,--check}'[Dry run: show what is pending, change nothing]' \
+  '--clean[Clean the package cache, with confirmation]' \
+  '--orphans[Remove orphaned packages, with confirmation]' \
+  '--firmware[Check/apply firmware updates via fwupdmgr]' \
+  '--snapshot[Create a system-level snapshot before updating]' \
+  '--deep-clean[Prune dev/container caches after updating]' \
+  '--inhibit-sleep[Prevent the system from sleeping while this runs]' \
+  '--audit[Run installed vulnerability-audit tools before updating]' \
+  '--rollback[Show a diff between the last two package snapshots and exit]' \
+  '--notify[Send a desktop notification when done]' \
+  '--no-pacman[Skip pacman + AUR]' \
+  '--no-apt[Skip apt]' \
+  '--no-dnf[Skip dnf]' \
+  '--no-yum[Skip yum]' \
+  '--no-zypper[Skip zypper]' \
+  '--no-apk[Skip apk]' \
+  '--no-brew[Skip Homebrew]' \
+  '--no-macports[Skip MacPorts]' \
+  '--no-pkg[Skip FreeBSD pkg]' \
+  '--no-pkg_add[Skip OpenBSD pkg_add]' \
+  '--no-flatpak[Skip Flatpak]' \
+  '--no-snap[Skip Snap]' \
+  '--no-nix[Skip Nix]' \
+  '--no-cargo[Skip cargo]' \
+  '--no-npm[Skip npm]' \
+  '--no-pipx[Skip pipx]' \
+  '--no-uv[Skip uv]' \
+  '--no-pnpm[Skip pnpm]' \
+  '--no-bun[Skip bun]' \
+  '(-h --help)'{-h,--help}'[Show help]' \
+  '(-v --version)'{-v,--version}'[Show version]'

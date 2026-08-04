@@ -1,0 +1,45 @@
+# Example config for update-anything.
+#
+# Copy to ~/.config/update-anything/config and uncomment what you want.
+# This file is sourced as real shell code before CLI flags are parsed, so
+# any flag you pass on the command line always overrides what's set here.
+# Same trust model as hooks.d/ or your shell rc files: it's your own file,
+# under your own $HOME, running with your own permissions.
+#
+# cp config.example ~/.config/update-anything/config
+
+# Skip this script's own confirmation prompts (package managers' own
+# destructive prompts still stay interactive -- see README's threat model).
+# ASSUME_YES=1
+
+# Also clean the package cache / remove orphaned packages every run.
+# DO_CLEAN=1
+# DO_ORPHANS=1
+
+# Also check/apply firmware updates via fwupdmgr every run.
+# DO_FIRMWARE=1
+
+# Also create a system-level snapshot (snapper/timeshift/bectl/zfs/tmutil)
+# before every update. Still asks for confirmation even with this set.
+# DO_SNAPSHOT=1
+
+# Also prune dev/container caches (flatpak/docker/podman/cargo-cache/go)
+# after every update. Each tool still asks for its own confirmation.
+# DO_DEEP_CLEAN=1
+
+# Prevent the system from sleeping while an update runs
+# (systemd-inhibit on Linux, caffeinate on macOS).
+# DO_INHIBIT_SLEEP=1
+
+# Run vulnerability-audit tools (arch-audit, and cargo audit if a
+# Cargo.lock is present in the current directory) before updating.
+# DO_AUDIT=1
+
+# Send a desktop notification when a run finishes
+# (notify-send on Linux, osascript on macOS).
+# DO_NOTIFY=1
+
+# Send a one-line status ping (hostname + outcome) to a Discord/Slack-style
+# webhook at the end of every run. Unset by default -- nothing is ever
+# sent anywhere unless you set this yourself.
+# UPDATE_ANYTHING_WEBHOOK_URL="https://discord.com/api/webhooks/..."
