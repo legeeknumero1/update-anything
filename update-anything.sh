@@ -38,8 +38,9 @@
 # Every step_* function is dispatched by name -- run_updates calls
 # "step_${mgr}" for each detected manager -- and cleanup runs from a trap.
 # ShellCheck can see neither, so without this it reports all of them as dead
-# code. Must precede the first command to apply to the whole file.
-# shellcheck disable=SC2329
+# code: SC2329 in newer releases, SC2317 in older ones, hence both.
+# Must precede the first command to apply to the whole file.
+# shellcheck disable=SC2329,SC2317
 
 set -uo pipefail
 
