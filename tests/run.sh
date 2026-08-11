@@ -61,11 +61,25 @@ assert_absent_from() {
 
 assert_exists() { if [ -e "$1" ]; then pass "$2"; else fail "$2 (missing: $1)"; fi; }
 
+# Utilities the script legitimately needs. The sandbox PATH is built from this
+# list alone, so the host's real package managers are unreachable: inheriting
+# /usr/bin meant a test machine with pacman installed actually ran pacman, and
+# the result depended on what happened to be installed on it.
+readonly SANDBOX_UTILS="bash sh date uname df awk sed grep find tee mkdir rmdir rm \
+cat cut head tail wc sort uniq diff hostname sleep kill tr basename dirname \
+mktemp chmod ls printf touch env id xargs"
+
 # A throwaway HOME plus stub package managers. Each stub appends its arguments
 # to a call log, so a test can assert both that a manager ran and how.
 new_sandbox() {
     SANDBOX="$(mktemp -d)"
-    mkdir -p "$SANDBOX/bin" "$SANDBOX/.config"
+    mkdir -p "$SANDBOX/bin" "$SANDBOX/sysbin" "$SANDBOX/.config"
+
+    local util path
+    for util in $SANDBOX_UTILS; do
+        path="$(command -v "$util" 2>/dev/null)" || continue
+        [ -n "$path" ] && ln -sf "$path" "$SANDBOX/sysbin/$util"
+    done
 
     local mgr
     for mgr in "$@"; do
@@ -86,6 +100,16 @@ exec "\$@"
 EOF
     chmod +x "$SANDBOX/bin/sudo"
 
+    # A curl that always succeeds, so the connectivity pre-flight passes
+    # without the suite depending on a working network — and, more to the
+    # point, without it reaching one.
+    printf '#!/bin/sh\nexit 0\n' > "$SANDBOX/bin/curl"
+    chmod +x "$SANDBOX/bin/curl"
+
+    # No pacman lock to find, and no processes to inspect.
+    printf '#!/bin/sh\nexit 1\n' > "$SANDBOX/bin/pgrep"
+    chmod +x "$SANDBOX/bin/pgrep"
+
     : > "$SANDBOX/calls.log"
     echo "$SANDBOX"
 }
@@ -96,12 +120,16 @@ drop_sandbox() { [ -n "$SANDBOX" ] && rm -rf "$SANDBOX"; SANDBOX=""; }
 # and often absent entirely. It is a guard against a hung test, not something
 # the suite depends on, so it is used when present and skipped when not —
 # hardcoding it made every macOS assertion fail with no output at all.
+# Resolved to an absolute path deliberately: run_in wipes the environment with
+# env -i and hands it a PATH containing only the sandbox, so env would look for
+# a bare "timeout" there and fail with the command never running at all.
 TIMEOUT_CMD=""
-if command -v timeout >/dev/null 2>&1; then
-    TIMEOUT_CMD="timeout 60"
-elif command -v gtimeout >/dev/null 2>&1; then
-    TIMEOUT_CMD="gtimeout 60"
+if _t="$(command -v timeout 2>/dev/null)" && [ -n "$_t" ]; then
+    TIMEOUT_CMD="$_t 60"
+elif _t="$(command -v gtimeout 2>/dev/null)" && [ -n "$_t" ]; then
+    TIMEOUT_CMD="$_t 60"
 fi
+unset _t
 readonly TIMEOUT_CMD
 
 # Nothing from the host leaks in: no real PATH, no XDG pointing at real state.
@@ -110,7 +138,7 @@ run_in() {
     # shellcheck disable=SC2086  # TIMEOUT_CMD is a command plus its argument
     env -i \
         HOME="$home" \
-        PATH="$home/bin:/usr/local/bin:/usr/bin:/bin" \
+        PATH="$home/bin:$home/sysbin" \
         TMPDIR="$home/tmp" \
         NO_COLOR=1 \
         $TIMEOUT_CMD bash "$SCRIPT" "$@"
@@ -243,6 +271,46 @@ test_lock_released_on_exit() {
     drop_sandbox
 }
 
+# --- Exit status ------------------------------------------------------------
+#
+# The status is what anything scripting this actually reads, and it used to be
+# decided by whichever command happened to run last.
+
+test_exit_zero_on_success() {
+    describe "exit status: zero when everything succeeded" || return 0
+    local home rc
+    home="$(new_sandbox flatpak)"; mkdir -p "$home/tmp"
+
+    run_in "$home" --yes >/dev/null 2>&1; rc=$?
+    assert_eq "$rc" "0" "a clean run exits 0"
+
+    run_in "$home" --check --yes >/dev/null 2>&1; rc=$?
+    assert_eq "$rc" "0" "--check exits 0 as well"
+    drop_sandbox
+}
+
+test_exit_nonzero_on_failure() {
+    describe "exit status: non-zero when a step failed" || return 0
+    local home rc
+    home="$(new_sandbox flatpak)"; mkdir -p "$home/tmp"
+
+    # A manager that fails its update but answers every other call.
+    cat > "$home/bin/flatpak" <<'EOF'
+#!/bin/sh
+case "$1" in update) exit 3 ;; esac
+exit 0
+EOF
+    chmod +x "$home/bin/flatpak"
+
+    run_in "$home" --yes >/dev/null 2>&1; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        pass "a failed step is reported through the exit status"
+    else
+        fail "reported success despite a failed step (exit $rc)"
+    fi
+    drop_sandbox
+}
+
 # --- State ------------------------------------------------------------------
 
 test_log_written() {
@@ -317,6 +385,8 @@ main() {
     test_refuses_to_run_as_root
     test_second_instance_refused
     test_lock_released_on_exit
+    test_exit_zero_on_success
+    test_exit_nonzero_on_failure
     test_log_written
     test_snapshot_before_changes
     test_config_is_honoured

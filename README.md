@@ -1,7 +1,7 @@
 # update-anything
 
 [![CI](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml/badge.svg)](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-20%20passing-brightgreen)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-23%20passing-brightgreen)](tests/run.sh)
 [![ShellCheck](https://img.shields.io/badge/shellcheck-strict-brightgreen)](https://www.shellcheck.net/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
@@ -134,7 +134,7 @@ them via a flag or by placing files in a specific directory.
 ## Tests
 
 ```sh
-./tests/run.sh              # 20 cases
+./tests/run.sh              # 23 cases
 ./tests/run.sh safety       # only cases matching a name
 ```
 
@@ -152,6 +152,17 @@ CI runs the suite on **Ubuntu and macOS**. The macOS runner is not decoration:
 this script is written to bash 3.2 because that is what macOS ships, and a
 Linux-only pipeline cannot prove that claim. Two further gates fail the build on
 bash 4+ syntax and on hardcoded home directories.
+
+## Exit status
+
+| Code | Meaning |
+|---|---|
+| 0 | every requested step succeeded, including `--check`, `--help` and `--version` |
+| 1 | a step failed, or a pre-flight check refused to start (no network, low disk, low battery, another instance already running, run as root, unknown flag) |
+| 130 | interrupted |
+
+Set explicitly rather than inherited from whatever ran last, so this is safe to
+put in a cron job or chain with `&&`.
 
 ## Usage
 

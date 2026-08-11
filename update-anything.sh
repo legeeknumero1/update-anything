@@ -35,6 +35,12 @@
 #   - portable: mkdir-based locking (no flock), POSIX df, curl-based
 #     connectivity check -- works the same on Linux, macOS and BSD
 
+# Every step_* function is dispatched by name -- run_updates calls
+# "step_${mgr}" for each detected manager -- and cleanup runs from a trap.
+# ShellCheck can see neither, so without this it reports all of them as dead
+# code. Must precede the first command to apply to the whole file.
+# shellcheck disable=SC2329
+
 set -uo pipefail
 
 # --- Constants --------------------------------------------------------------
@@ -358,10 +364,19 @@ warm_sudo() {
     error "Could not obtain sudo credentials."
     exit 1
   fi
+  # Sleeps in one-second steps rather than one 60-second step. Killing the
+  # subshell does not kill a sleep already running inside it, so a single long
+  # sleep was left orphaned and outlived the script by up to a minute; and the
+  # parent-liveness check only ran once a minute, so a killed script kept its
+  # keepalive alive for just as long. Both windows are now a second.
   (while true; do
-    sudo -n true
-    sleep 60
-    kill -0 "$$" 2>/dev/null || exit
+    sudo -n true 2>/dev/null || exit 0
+    _elapsed=0
+    while [ "$_elapsed" -lt 60 ]; do
+      sleep 1
+      kill -0 "$$" 2>/dev/null || exit 0
+      _elapsed=$((_elapsed + 1))
+    done
   done) &
   SUDO_KEEPALIVE_PID=$!
 }
@@ -1163,4 +1178,20 @@ else
   warn "Completed with issues in: ${FAILED_STEPS[*]}"
   notify_user "System update" "Completed with issues: ${FAILED_STEPS[*]}"
 fi
-[[ "$CHECK_ONLY" -eq 0 ]] && send_webhook
+
+if [[ "$CHECK_ONLY" -eq 0 ]]; then
+  send_webhook
+fi
+
+# The exit status is the contract for anything scripting this: zero only when
+# every requested step succeeded, 1 when any of them failed.
+#
+# It has to be set explicitly. The EXIT trap propagates $?, so whatever ran
+# last decided the status: `[[ "$CHECK_ONLY" -eq 0 ]] && send_webhook` returned
+# false under --check and made a clean run exit 1, while a run with failed steps
+# ended on a successful send_webhook and exited 0 — reporting success for a
+# failed update, which is the worse half of the same bug.
+if [[ "${#FAILED_STEPS[@]}" -gt 0 ]]; then
+  exit 1
+fi
+exit 0

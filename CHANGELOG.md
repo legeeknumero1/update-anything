@@ -21,6 +21,19 @@ and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **`--check` always exited 1, even on complete success.** The script's last
+  statement was `[[ "$CHECK_ONLY" -eq 0 ]] && send_webhook`, and the `EXIT` trap
+  propagates `$?` — so under `--check` the short-circuit decided the exit status.
+- **A run with failed steps exited 0.** The same line, from the other side: on a
+  normal run `send_webhook` succeeded and became the status, so three failed
+  package managers still reported success. Anything scripting this — cron, CI,
+  a `&&` chain — could not tell an update apart from a failure. The status is
+  now set explicitly: zero only when every requested step succeeded.
+- **The sudo keepalive outlived the script.** `cleanup` killed the keepalive
+  subshell but not the `sleep 60` already running inside it, leaving an orphan
+  process for up to a minute after exit; the same single long sleep meant a
+  killed script kept its keepalive for just as long. It now sleeps in
+  one-second steps, so both windows are a second.
 - **CI was red on `main`.** Three ShellCheck warnings failed the only workflow
   run since the initial release. Two were real (`SC2155`, masking a return value
   by declaring and assigning together); the rest are deliberate and now carry an
