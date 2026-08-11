@@ -92,15 +92,28 @@ EOF
 
 drop_sandbox() { [ -n "$SANDBOX" ] && rm -rf "$SANDBOX"; SANDBOX=""; }
 
+# GNU timeout is not on macOS or the BSDs, where it is gtimeout from coreutils
+# and often absent entirely. It is a guard against a hung test, not something
+# the suite depends on, so it is used when present and skipped when not —
+# hardcoding it made every macOS assertion fail with no output at all.
+TIMEOUT_CMD=""
+if command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_CMD="timeout 60"
+elif command -v gtimeout >/dev/null 2>&1; then
+    TIMEOUT_CMD="gtimeout 60"
+fi
+readonly TIMEOUT_CMD
+
 # Nothing from the host leaks in: no real PATH, no XDG pointing at real state.
 run_in() {
     local home="$1"; shift
+    # shellcheck disable=SC2086  # TIMEOUT_CMD is a command plus its argument
     env -i \
         HOME="$home" \
         PATH="$home/bin:/usr/local/bin:/usr/bin:/bin" \
         TMPDIR="$home/tmp" \
         NO_COLOR=1 \
-        timeout 60 bash "$SCRIPT" "$@"
+        $TIMEOUT_CMD bash "$SCRIPT" "$@"
 }
 
 calls_in() { cat "$1/calls.log" 2>/dev/null; }
