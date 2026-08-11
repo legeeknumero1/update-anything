@@ -47,7 +47,7 @@ set -uo pipefail
 # --- Constants --------------------------------------------------------------
 
 readonly SCRIPT_NAME="update-anything"
-readonly VERSION="1.0.1"
+readonly VERSION="1.1.0"
 readonly STATE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/${SCRIPT_NAME}"
 readonly LOG_DIR="${STATE_DIR}/logs"
 readonly SNAPSHOT_DIR="${STATE_DIR}/pkg-snapshots"
@@ -77,7 +77,20 @@ DO_SNAPSHOT=0
 DO_DEEP_CLEAN=0
 DO_INHIBIT_SLEEP=0
 DO_AUDIT=0
+QUIET=0
+NO_PARALLEL=0
 SKIP_LIST=" "
+ONLY_LIST=""
+
+# Managers that need no elevation and touch entirely separate trees, so they
+# can run concurrently. System managers are deliberately absent: they share a
+# package database and a sudo ticket, and running two of them at once is the
+# corruption this script exists to avoid.
+readonly PARALLEL_SAFE=" cargo npm pipx uv pnpm bun "
+
+# Per-step wall-clock timings, "label=seconds", filled by run_step. A plain
+# array rather than an associative one, which bash 3.2 does not have.
+STEP_TIMINGS=()
 
 # Sourced as real shell code -- same trust model as hooks.d/ or your own
 # shell rc files (your permissions, your call), not a restricted key=value
@@ -122,12 +135,15 @@ log() {
   printf '%s [%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$level" "$*" >>"$LOG_FILE"
 }
 
+# --quiet silences progress but never warnings or errors, and never the log:
+# a cron job should be silent when it worked and loud when it did not, while
+# still leaving a full record on disk.
 info() {
-  echo "${C_BLUE}[*]${C_RESET} $*"
+  [[ "$QUIET" -eq 0 ]] && echo "${C_BLUE}[*]${C_RESET} $*"
   log "INFO" "$*"
 }
 success() {
-  echo "${C_GREEN}[OK]${C_RESET} $*"
+  [[ "$QUIET" -eq 0 ]] && echo "${C_GREEN}[OK]${C_RESET} $*"
   log "OK" "$*"
 }
 warn() {
@@ -139,8 +155,10 @@ error() {
   log "ERROR" "$*"
 }
 section() {
-  echo
-  echo "${C_BOLD}== $* ==${C_RESET}"
+  if [[ "$QUIET" -eq 0 ]]; then
+    echo
+    echo "${C_BOLD}== $* ==${C_RESET}"
+  fi
   log "SECTION" "$*"
 }
 
@@ -153,10 +171,77 @@ confirm() {
 }
 
 is_skipped() {
+  # --only, when given, is authoritative: anything outside it is skipped
+  # regardless of --no-*. Checked first so the two can be combined without the
+  # result depending on which was parsed last.
+  if [[ -n "$ONLY_LIST" ]]; then
+    case "$ONLY_LIST" in
+    *" $1 "*) ;;
+    *) return 0 ;;
+    esac
+  fi
   case "$SKIP_LIST" in
   *" $1 "*) return 0 ;;
   *) return 1 ;;
   esac
+}
+
+# Packages each manager has been told to hold back, using that manager's own
+# mechanism. This only reports them: reimplementing holds here would mean
+# either duplicating state the manager already owns, or overriding a decision
+# the user deliberately recorded. Neither is this script's business -- but
+# silently upgrading around a hold, with no indication it exists, is how you
+# end up wondering why a package never moves.
+#
+# Deselected managers are not consulted at all: --no-flatpak has to mean the
+# script does not touch flatpak, not that it merely declines to upgrade it.
+report_holds() {
+  local found=0 held=""
+
+  if ! is_skipped pacman && command -v pacman >/dev/null 2>&1 && [[ -r /etc/pacman.conf ]]; then
+    held=$(sed -n 's/^[[:space:]]*IgnorePkg[[:space:]]*=[[:space:]]*//p' /etc/pacman.conf | tr '\n' ' ')
+    [[ -n "$held" ]] && {
+      info "pacman holds (IgnorePkg): $held"
+      found=1
+    }
+  fi
+
+  if ! is_skipped apt && command -v apt-mark >/dev/null 2>&1; then
+    held=$(apt-mark showhold 2>/dev/null | tr '\n' ' ')
+    [[ -n "$held" ]] && {
+      info "apt holds (apt-mark hold): $held"
+      found=1
+    }
+  fi
+
+  if ! is_skipped dnf && command -v dnf >/dev/null 2>&1; then
+    held=$(dnf versionlock list 2>/dev/null | grep -v '^Last metadata' | tr '\n' ' ')
+    [[ -n "$held" ]] && {
+      info "dnf holds (versionlock): $held"
+      found=1
+    }
+  fi
+
+  if ! is_skipped brew && command -v brew >/dev/null 2>&1; then
+    held=$(brew list --pinned 2>/dev/null | tr '\n' ' ')
+    [[ -n "$held" ]] && {
+      info "Homebrew holds (brew pin): $held"
+      found=1
+    }
+  fi
+
+  if ! is_skipped flatpak && command -v flatpak >/dev/null 2>&1; then
+    held=$(flatpak mask 2>/dev/null | grep -v '^$' | tr '\n' ' ')
+    [[ -n "$held" ]] && {
+      info "Flatpak holds (flatpak mask): $held"
+      found=1
+    }
+  fi
+
+  if [[ "$found" -eq 1 ]]; then
+    info "These are held by your package managers and will not be upgraded."
+    info "To release one, use that manager's own command (e.g. 'sudo apt-mark unhold <pkg>')."
+  fi
 }
 
 notify_user() {
@@ -436,14 +521,26 @@ run_step() {
   shift
   section "$label"
   log "CMD" "$*"
+
+  local started ended rc
+  started=$(date +%s)
+
   if "$@" 2>&1 | tee -a "$LOG_FILE"; then
+    rc=0
+  else
+    rc=1
+  fi
+
+  ended=$(date +%s)
+  STEP_TIMINGS+=("${label}=$((ended - started))")
+
+  if [[ "$rc" -eq 0 ]]; then
     success "$label done."
     return 0
-  else
-    error "$label failed (see log). Continuing with remaining steps."
-    FAILED_STEPS+=("$label")
-    return 1
   fi
+  error "$label failed (see log). Continuing with remaining steps."
+  FAILED_STEPS+=("$label")
+  return 1
 }
 
 # --- System package manager steps (one per manager, all opt-out via --no-X) ---
@@ -794,16 +891,83 @@ run_updates() {
     warn "No supported package manager found on this system."
     return
   fi
+
   local mgr
+  local -a deferred=()
+
+  # System managers run first, one at a time, in order. They share a package
+  # database and a sudo ticket, and their prompts need a terminal to
+  # themselves -- interleaving two of those is exactly the corruption this
+  # script is written to avoid.
   for mgr in "${MANAGERS[@]}"; do
-    is_skipped "$mgr" && {
-      info "Skipping $mgr (--no-$mgr)."
+    if is_skipped "$mgr"; then
+      info "Skipping $mgr (deselected)."
       continue
-    }
-    if declare -f "step_${mgr}" >/dev/null; then
+    fi
+    declare -f "step_${mgr}" >/dev/null || continue
+
+    case "$PARALLEL_SAFE" in
+    *" $mgr "*)
+      deferred+=("$mgr")
+      continue
+      ;;
+    esac
+    "step_${mgr}"
+  done
+
+  [[ "${#deferred[@]}" -eq 0 ]] && return 0
+
+  # One left, or parallelism disabled: nothing to gain from the machinery.
+  if [[ "${#deferred[@]}" -eq 1 || "$NO_PARALLEL" -eq 1 ]]; then
+    for mgr in "${deferred[@]}"; do
       "step_${mgr}"
+    done
+    return 0
+  fi
+
+  section "User-space managers (${deferred[*]}) in parallel"
+  info "These need no elevation and touch separate trees, so they run together."
+
+  # Each writes to its own file rather than the shared terminal: concurrent
+  # writers would interleave mid-line and make every failure unreadable. The
+  # output is replayed in a fixed order afterwards, so a run stays diffable.
+  local tmpdir
+  tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/${SCRIPT_NAME}-par.XXXXXX") || {
+    warn "Could not create a temporary directory; running user-space managers sequentially."
+    for mgr in "${deferred[@]}"; do
+      "step_${mgr}"
+    done
+    return 0
+  }
+
+  local started ended
+  started=$(date +%s)
+
+  for mgr in "${deferred[@]}"; do
+    ("step_${mgr}" >"${tmpdir}/${mgr}.out" 2>&1; echo "$?" >"${tmpdir}/${mgr}.rc") &
+  done
+  wait
+
+  ended=$(date +%s)
+
+  for mgr in "${deferred[@]}"; do
+    section "$mgr"
+    [[ -s "${tmpdir}/${mgr}.out" ]] && cat "${tmpdir}/${mgr}.out"
+    cat "${tmpdir}/${mgr}.out" >>"$LOG_FILE" 2>/dev/null
+
+    # A step that failed inside a subshell cannot append to FAILED_STEPS in
+    # this one, so its status is carried back through a file instead.
+    if [[ "$(cat "${tmpdir}/${mgr}.rc" 2>/dev/null || echo 1)" -ne 0 ]]; then
+      case " ${FAILED_STEPS[*]:-} " in
+      *" $mgr "*) ;;
+      *) FAILED_STEPS+=("$mgr") ;;
+      esac
     fi
   done
+
+  rm -rf "$tmpdir"
+  STEP_TIMINGS+=("user-space (parallel)=$((ended - started))")
+  success "User-space managers finished in $((ended - started))s."
 }
 
 # --- Post-update checks (Linux/Arch-specific bits are self-guarded) -----------
@@ -1043,8 +1207,30 @@ Options:
   --notify          Send a desktop notification when done (notify-send on
                      Linux, osascript on macOS).
   --no-<manager>    Skip one manager by name, e.g. --no-snap --no-brew.
+  --only <manager>  Update only these, ignoring everything else. Repeatable
+                     and comma-separated: --only flatpak,cargo. Takes
+                     precedence over --no-<manager>.
+  -q, --quiet       Print only warnings and errors. The log is unaffected,
+                     so a cron job stays silent when it worked and speaks up
+                     when it did not.
+  --no-parallel     Run user-space managers one at a time. They are run
+                     concurrently by default, since none of them need root
+                     or share state; use this if you want readable live
+                     output instead.
   -h, --help        Show this help.
   -v, --version     Show version and exit.
+
+Exit status:
+  0   every requested step succeeded (including --check/--help/--version)
+  1   a step failed, or a pre-flight check refused to start
+  130 interrupted
+
+Held packages:
+  Packages held back through your package manager's own mechanism
+  (pacman IgnorePkg, apt-mark hold, dnf versionlock, brew pin, flatpak mask)
+  are reported before updating, so a package that never moves is visible
+  rather than mysterious. This script never overrides a hold, and never
+  adds one -- use the manager's own command for that.
 
 Config file:
   ~/.config/update-anything/config, if present, is sourced as shell code
@@ -1100,6 +1286,19 @@ while [[ $# -gt 0 ]]; do
   --audit) DO_AUDIT=1 ;;
   --rollback) show_rollback_diff ;;
   --notify) DO_NOTIFY=1 ;;
+  -q | --quiet) QUIET=1 ;;
+  --no-parallel) NO_PARALLEL=1 ;;
+  --only)
+    [[ -n "${2:-}" ]] || {
+      error "--only needs a manager name, e.g. --only flatpak"
+      exit 1
+    }
+    # Repeatable and comma-separated both work: --only a --only b, or --only a,b
+    ONLY_LIST="${ONLY_LIST:- }$(printf '%s' "$2" | tr ',' ' ') "
+    shift
+    ;;
+  # Must come after --no-parallel, or that flag would be read as a manager
+  # named "parallel" and silently do nothing.
   --no-*) SKIP_LIST="${SKIP_LIST}${1#--no-} " ;;
   -h | --help)
     usage
@@ -1148,6 +1347,8 @@ check_disk_space
 check_pacman_lock
 register_managers
 info "Detected package managers: ${MANAGERS[*]:-none}"
+[[ -n "$ONLY_LIST" ]] && info "Restricted to:${ONLY_LIST}(--only)"
+report_holds
 [[ "$CHECK_ONLY" -eq 0 ]] && warm_sudo
 snapshot_packages
 
@@ -1172,6 +1373,17 @@ if [[ "$CHECK_ONLY" -eq 0 ]]; then
 fi
 
 section "Summary"
+
+# Where the time actually went. Sorted longest first, because the only reason
+# to read this is to find out what to skip next time.
+if [[ "${#STEP_TIMINGS[@]}" -gt 0 && "$QUIET" -eq 0 ]]; then
+  printf '%s\n' "${STEP_TIMINGS[@]}" \
+    | awk -F= '$2 >= 1 { printf "%6ds  %s\n", $2, $1 }' \
+    | sort -rn \
+    | head -10
+  echo
+fi
+
 if [[ "${#FAILED_STEPS[@]}" -eq 0 ]]; then
   success "All requested steps completed."
   notify_user "System update" "All package managers updated successfully."

@@ -311,6 +311,143 @@ EOF
     drop_sandbox
 }
 
+# --- Selection and output ----------------------------------------------------
+
+test_only_restricts_to_listed() {
+    describe "selection: --only updates nothing else" || return 0
+    local home
+    home="$(new_sandbox flatpak npm cargo)"; mkdir -p "$home/tmp"
+
+    run_in "$home" --check --yes --only flatpak >/dev/null 2>&1
+
+    local calls; calls="$(calls_in "$home")"
+    assert_contains "$calls" "flatpak" "the selected manager runs"
+    assert_absent_from "$calls" "npm" "an unlisted manager does not"
+    assert_absent_from "$calls" "cargo" "nor another one"
+    drop_sandbox
+}
+
+test_only_accepts_a_list() {
+    describe "selection: --only takes several managers" || return 0
+    local home
+    home="$(new_sandbox flatpak npm cargo)"; mkdir -p "$home/tmp"
+
+    run_in "$home" --check --yes --only flatpak,cargo >/dev/null 2>&1
+
+    local calls; calls="$(calls_in "$home")"
+    assert_contains "$calls" "flatpak" "the first listed manager runs"
+    assert_contains "$calls" "cargo" "the second one too"
+    assert_absent_from "$calls" "npm" "and nothing outside the list"
+    drop_sandbox
+}
+
+test_only_beats_no_flag() {
+    describe "selection: --only wins over --no-<manager>" || return 0
+    local home
+    home="$(new_sandbox flatpak npm)"; mkdir -p "$home/tmp"
+
+    # Contradictory on purpose: the result must not depend on parse order.
+    run_in "$home" --check --yes --only flatpak --no-flatpak >/dev/null 2>&1
+    assert_absent_from "$(calls_in "$home")" "npm" "the unlisted manager stays out"
+    drop_sandbox
+}
+
+test_quiet_silences_progress_not_problems() {
+    describe "output: --quiet keeps warnings, drops progress" || return 0
+    local home out
+    home="$(new_sandbox)"; mkdir -p "$home/tmp"
+
+    out="$(run_in "$home" --check --yes --quiet 2>&1)"
+    assert_absent_from "$out" "Checking internet" "progress messages are gone"
+
+    # No manager at all is a warning, and a warning must survive --quiet.
+    assert_contains "$out" "No supported package manager" "warnings still get through"
+    drop_sandbox
+}
+
+test_quiet_still_logs() {
+    describe "output: --quiet still writes the log" || return 0
+    local home
+    home="$(new_sandbox flatpak)"; mkdir -p "$home/tmp"
+
+    run_in "$home" --check --yes --quiet >/dev/null 2>&1
+
+    local logged
+    logged="$(cat "$home/.local/share/update-anything/logs/"*.log 2>/dev/null)"
+    assert_contains "$logged" "INFO" "the file keeps the detail the terminal did not show"
+    drop_sandbox
+}
+
+test_parallel_runs_all_user_space_managers() {
+    describe "parallel: every user-space manager still runs" || return 0
+    local home
+    home="$(new_sandbox cargo npm pipx)"; mkdir -p "$home/tmp"
+
+    run_in "$home" --yes >/dev/null 2>&1
+
+    # Concurrency must not lose a manager, and each writes to its own file
+    # before the output is replayed, so nothing should go missing.
+    local calls; calls="$(calls_in "$home")"
+    assert_contains "$calls" "cargo" "cargo ran"
+    assert_contains "$calls" "npm" "npm ran"
+    assert_contains "$calls" "pipx" "pipx ran"
+    drop_sandbox
+}
+
+test_parallel_failure_is_reported() {
+    describe "parallel: a failure inside a subshell still surfaces" || return 0
+    local home rc
+    home="$(new_sandbox cargo npm)"; mkdir -p "$home/tmp"
+
+    # A subshell cannot append to FAILED_STEPS in the parent, so the status
+    # travels back through a file. If that breaks, this exits 0.
+    # Reports something to update, then fails the update itself. A stub that
+    # failed the "outdated" query instead would make step_npm return early with
+    # "up to date" and never reach the failure path at all.
+    cat > "$home/bin/npm" <<'EOF'
+#!/bin/sh
+case "$*" in
+  *update*) exit 4 ;;
+  *outdated*) echo "/usr/lib/node_modules/example:example@1.0.0:example@2.0.0"; exit 0 ;;
+esac
+exit 0
+EOF
+    chmod +x "$home/bin/npm"
+
+    run_in "$home" --yes >/dev/null 2>&1; rc=$?
+    if [ "$rc" -ne 0 ]; then
+        pass "the exit status reflects a parallel step failing"
+    else
+        fail "a failure inside the parallel block was swallowed (exit $rc)"
+    fi
+    drop_sandbox
+}
+
+test_no_parallel_still_works() {
+    describe "parallel: --no-parallel runs them sequentially" || return 0
+    local home
+    home="$(new_sandbox cargo npm)"; mkdir -p "$home/tmp"
+
+    run_in "$home" --yes --no-parallel >/dev/null 2>&1
+
+    local calls; calls="$(calls_in "$home")"
+    assert_contains "$calls" "cargo" "cargo still ran"
+    assert_contains "$calls" "npm" "npm still ran"
+    drop_sandbox
+}
+
+test_no_parallel_is_not_a_manager() {
+    describe "parallel: --no-parallel is not read as a manager name" || return 0
+    local home
+    home="$(new_sandbox flatpak)"; mkdir -p "$home/tmp"
+
+    # --no-* is a catch-all, so ordering in the case statement decides whether
+    # this flag works or silently adds "parallel" to the skip list.
+    run_in "$home" --check --yes --no-parallel >/dev/null 2>&1
+    assert_contains "$(calls_in "$home")" "flatpak" "unrelated managers are unaffected"
+    drop_sandbox
+}
+
 # --- State ------------------------------------------------------------------
 
 test_log_written() {
@@ -347,6 +484,34 @@ test_config_is_honoured() {
     run_in "$home" --check --yes >/dev/null 2>&1
     assert_absent_from "$(calls_in "$home")" "flatpak" \
         "a manager skipped in the config does not run"
+    drop_sandbox
+}
+
+test_config_only_list_is_honoured() {
+    describe "state: ONLY_LIST set in the config restricts the run" || return 0
+    local home
+    home="$(new_sandbox flatpak npm)"; mkdir -p "$home/tmp" "$home/.config/update-anything"
+    # Exactly the form config.example documents, spacing included: the list is
+    # matched as " name ", so a config that drops the spaces silently matches
+    # nothing. That is worth a test rather than a comment.
+    printf 'ONLY_LIST=" flatpak "\n' > "$home/.config/update-anything/config"
+
+    run_in "$home" --check --yes >/dev/null 2>&1
+    local calls; calls="$(calls_in "$home")"
+    assert_contains "$calls" "flatpak" "the manager named in the config runs"
+    assert_absent_from "$calls" "npm" "everything else is left alone"
+    drop_sandbox
+}
+
+test_config_quiet_is_honoured() {
+    describe "state: QUIET set in the config silences progress" || return 0
+    local home out
+    home="$(new_sandbox)"; mkdir -p "$home/tmp" "$home/.config/update-anything"
+    printf 'QUIET=1\n' > "$home/.config/update-anything/config"
+
+    out="$(run_in "$home" --check --yes 2>&1)"
+    assert_absent_from "$out" "Checking internet" "progress is gone without any flag"
+    assert_contains "$out" "No supported package manager" "warnings still get through"
     drop_sandbox
 }
 
@@ -387,9 +552,20 @@ main() {
     test_lock_released_on_exit
     test_exit_zero_on_success
     test_exit_nonzero_on_failure
+    test_only_restricts_to_listed
+    test_only_accepts_a_list
+    test_only_beats_no_flag
+    test_quiet_silences_progress_not_problems
+    test_quiet_still_logs
+    test_parallel_runs_all_user_space_managers
+    test_parallel_failure_is_reported
+    test_no_parallel_still_works
+    test_no_parallel_is_not_a_manager
     test_log_written
     test_snapshot_before_changes
     test_config_is_honoured
+    test_config_only_list_is_honoured
+    test_config_quiet_is_honoured
     test_bash32_compatible
     test_no_hardcoded_home
 

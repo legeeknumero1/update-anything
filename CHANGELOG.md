@@ -3,6 +3,30 @@
 Notable changes, newest first. Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-08-11
+
+### Added
+
+- **Held packages are reported before updating.** Packages your package manager
+  has been told to hold back — `pacman` `IgnorePkg`, `apt-mark hold`, `dnf
+  versionlock`, `brew pin`, `flatpak mask` — are listed at the start of a run.
+  The script never adds or overrides a hold: that state belongs to the manager
+  that owns it. It simply stops a package that never moves from being a
+  mystery. Deselected managers are not consulted at all.
+- **User-space managers run in parallel.** `cargo`, `npm`, `pipx`, `uv`, `pnpm`
+  and `bun` need no elevation and touch separate trees, so they now run
+  concurrently — measured at 2s instead of 6s for three managers taking 2s
+  each. System managers deliberately stay sequential: they share a package
+  database and a sudo ticket. `--no-parallel` restores the old behaviour when
+  you want readable live output.
+- **`--only <manager>`**, the inverse of `--no-<manager>`. Repeatable and
+  comma-separated, and authoritative when both are given.
+- **`-q`/`--quiet`**: only warnings and errors reach the terminal, while the
+  log keeps everything. With the exit-status fix below, that is what makes this
+  usable from cron — silent when it worked, loud when it did not.
+- **Per-step timings** in the summary, longest first, so it is obvious what to
+  skip next time.
+
 ## [1.0.1] — 2026-08-11
 
 ### Added

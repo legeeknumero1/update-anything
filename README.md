@@ -1,7 +1,7 @@
 # update-anything
 
 [![CI](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml/badge.svg)](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-23%20passing-brightgreen)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-44%20passing-brightgreen)](tests/run.sh)
 [![ShellCheck](https://img.shields.io/badge/shellcheck-strict-brightgreen)](https://www.shellcheck.net/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
@@ -27,8 +27,10 @@ as a backend when present), `uv`, `pnpm`, `bun`, global `npm`, `pipx`.
 
 - `bash` (written against 3.2 syntax -- works with macOS's stock bash, no
   need for a newer one from Homebrew).
-- `sudo` present if any detected manager needs root (most system package
-  managers do; Homebrew, MacPorts on macOS, cargo, npm, pipx don't).
+- `sudo`, only if a detected manager needs root (most system package managers
+  do; Homebrew, MacPorts on macOS, cargo, npm, pipx don't). It is asked for
+  **once**, up front, then kept alive in the background for the whole run -- a
+  long AUR build never stops to ask again halfway through.
 - `curl` recommended for the connectivity check (falls back to `wget`,
   then to bash's `/dev/tcp`).
 
@@ -102,6 +104,22 @@ them via a flag or by placing files in a specific directory.
   tool, not a system scanner -- `npm audit` isn't run at all for the same
   reason (no meaningful "global" mode). If neither applies, it says so
   instead of pretending to have audited anything.
+- **`--only <manager>`** -- the inverse of `--no-<manager>`: update only what
+  you name, ignoring everything else. Repeatable and comma-separated
+  (`--only flatpak,cargo`), and authoritative if both are given.
+- **`-q`/`--quiet`** -- only warnings and errors reach the terminal; the log
+  keeps everything. Combined with the exit status below, that is what makes
+  this usable from cron: silent when it worked, loud when it did not.
+- **`--no-parallel`** -- user-space managers (`cargo`, `npm`, `pipx`, `uv`,
+  `pnpm`, `bun`) run concurrently by default, since none need root and none
+  share state; measured at 2s rather than 6s for three managers taking 2s each.
+  System managers always stay sequential -- they share a package database and a
+  sudo ticket. Use this flag when you would rather watch their output live.
+- **Held packages are reported** at the start of every run: `pacman` `IgnorePkg`,
+  `apt-mark hold`, `dnf versionlock`, `brew pin`, `flatpak mask`. This script
+  never adds a hold and never overrides one -- that state belongs to the manager
+  that owns it, and duplicating it here would just be a second place to get it
+  wrong. Reporting it stops a package that never moves from being a mystery.
 - **`--rollback`** -- diffs the last two package-list snapshots and exits.
   This is intentionally just a diff, not an automated downgrade: generating
   a correct downgrade command per package (right cached version, right
@@ -134,7 +152,7 @@ them via a flag or by placing files in a specific directory.
 ## Tests
 
 ```sh
-./tests/run.sh              # 23 cases
+./tests/run.sh              # 44 cases
 ./tests/run.sh safety       # only cases matching a name
 ```
 
@@ -172,6 +190,8 @@ update-anything                  # interactive full update
 update-anything -y                # skip this script's own prompts
 update-anything --clean --orphans # also clean cache / remove orphans (asks first)
 update-anything --no-snap --no-brew
+update-anything --only flatpak,cargo # update just these two, ignore the rest
+update-anything -y --quiet         # what a cron entry looks like
 update-anything --snapshot --inhibit-sleep --deep-clean
 update-anything --audit --check    # see known CVEs in installed packages, change nothing
 update-anything --rollback         # diff the last two package snapshots

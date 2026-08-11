@@ -39,6 +39,23 @@
 # (notify-send on Linux, osascript on macOS).
 # DO_NOTIFY=1
 
+# Only warnings and errors on the terminal; the log still records everything.
+# The point of a cron entry: silent when it worked, loud when it did not.
+# QUIET=1
+
+# Run every manager one after another. By default the user-space ones
+# (cargo, npm, pipx, uv, pnpm, bun) run concurrently, since none need root
+# and none share state; set this if you would rather watch their output live.
+# System managers are always sequential regardless.
+# NO_PARALLEL=1
+
+# Update only these managers, ignoring everything else. Note the leading and
+# trailing spaces -- the list is matched as " name ".
+# ONLY_LIST=" flatpak cargo "
+
+# Never touch these managers. Same " name " spacing rule.
+# SKIP_LIST=" snap brew "
+
 # Send a one-line status ping (hostname + outcome) to a Discord/Slack-style
 # webhook at the end of every run. Unset by default -- nothing is ever
 # sent anywhere unless you set this yourself.

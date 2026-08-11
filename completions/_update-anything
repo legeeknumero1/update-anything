@@ -14,6 +14,9 @@ _arguments \
   '--audit[Run installed vulnerability-audit tools before updating]' \
   '--rollback[Show a diff between the last two package snapshots and exit]' \
   '--notify[Send a desktop notification when done]' \
+  '--only[Update only these managers (repeatable, comma-separated)]:manager:(pacman apt dnf yum zypper apk brew macports pkg pkg_add flatpak snap nix cargo npm pipx uv pnpm bun)' \
+  '(-q --quiet)'{-q,--quiet}'[Print only warnings and errors]' \
+  '--no-parallel[Run user-space managers one at a time]' \
   '--no-pacman[Skip pacman + AUR]' \
   '--no-apt[Skip apt]' \
   '--no-dnf[Skip dnf]' \
