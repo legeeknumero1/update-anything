@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      # -S style is the strictest level, so stylistic problems fail the build
+      # too. Deliberate exceptions carry an inline disable and a reason.
+      - name: Lint every script
+        run: |
+          shellcheck -S style \
+            update-anything.sh install.sh tests/run.sh \
+            completions/update-anything.bash
+
+  syntax:
+    name: Syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Parse every script
+        run: |
+          for f in update-anything.sh install.sh tests/run.sh; do
+            bash -n "$f" || exit 1
+          done
+
+  tests:
+    name: Tests
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS is not decoration: the script is written to bash 3.2 precisely
+        # because that is what macOS ships, and only a macOS runner proves it.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run the test suite
+        run: NO_COLOR=1 ./tests/run.sh
+
+  portability:
+    name: Portability
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The script promises to run on macOS, which ships bash 3.2. These four
+      # constructs are the usual way a script silently stops working there.
+      - name: Reject bash 4+ syntax
+        run: |
+          if sed 's/#.*//' update-anything.sh install.sh \
+               | grep -nE 'declare -A|mapfile|readarray|\$\{[A-Za-z_]+,,\}|local -n'; then
+            echo "bash 4+ syntax found — this must stay bash 3.2 compatible."
+            exit 1
+          fi
+          echo "bash 3.2 compatible."
+
+      # Detecting what is installed is the whole point; a literal home
+      # directory in the source is a regression, not a detail.
+      - name: Reject hardcoded home directories
+        run: |
+          if grep -nE '/home/[a-z]+/|/Users/[a-z]+/' \
+               update-anything.sh install.sh; then
+            echo "Hardcoded path found — derive it at runtime instead."
+            exit 1
+          fi
+          echo "No hardcoded paths."

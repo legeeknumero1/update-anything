@@ -1,5 +1,10 @@
 # update-anything
 
+[![CI](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml/badge.svg)](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-20%20passing-brightgreen)](tests/run.sh)
+[![ShellCheck](https://img.shields.io/badge/shellcheck-strict-brightgreen)](https://www.shellcheck.net/)
+[![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
+
 A single portable bash script that updates every package manager actually
 installed on the machine, on any Unix (Linux, macOS, FreeBSD, OpenBSD),
 without assuming any of them are present.
@@ -30,23 +35,24 @@ as a backend when present), `uv`, `pnpm`, `bun`, global `npm`, `pipx`.
 ## 3. Install
 
 ```
-git clone <this-repo> update-anything && cd update-anything
+git clone https://github.com/legeeknumero1/update-anything && cd update-anything
 ./install.sh
 update-anything --help
 ```
 
-(No remote one-liner yet -- `install.sh` only copies a local checkout into
-`~/.local/bin`. A `curl | bash` installer needs a real hosted URL, which
-doesn't exist until this project has a public repo.)
+`install.sh` copies a local checkout into `~/.local/bin`. There is deliberately
+no `curl | bash` one-liner: piping a remote script straight into a shell is a
+poor habit to encourage, and doubly so for a tool that goes on to invoke package
+managers through `sudo`. Clone it, read it, then install it.
 
 `install.sh` also installs shell completions into whichever completion
 directory it actually finds (bash-completion, an existing zsh `$fpath` dir,
 fish) -- none are assumed present. Run `./install.sh --uninstall` to remove
 the binary and any completions it installed.
 
-`.github/workflows/lint.yml` runs ShellCheck + a bash syntax check on every
-push/PR once this is pushed to GitHub (no badge here yet -- that needs a
-real repo URL to point at, which doesn't exist until this is published).
+Every push and pull request runs ShellCheck at its strictest level, a syntax
+parse, the test suite on both Linux and macOS, and two gates that reject bash
+4+ syntax and hardcoded home directories. See [Tests](#tests).
 
 ## 4. Advanced, opt-in features
 
@@ -124,6 +130,28 @@ them via a flag or by placing files in a specific directory.
 | `--snapshot` silently eats minutes/disk space | Still asks for confirmation even when the flag is passed; only ever tries one detected tool, never several |
 | Config file could be mistaken for a safe declarative format | Documented plainly as real sourced shell code (same trust level as hooks.d/), not a restricted parser |
 | `--rollback` misused as an automatic downgrade tool | Deliberately scoped to a diff only; no downgrade command is generated or run |
+
+## Tests
+
+```sh
+./tests/run.sh              # 20 cases
+./tests/run.sh safety       # only cases matching a name
+```
+
+Nothing in the suite updates anything. Each case runs the script against a
+throwaway `HOME` with **stub package managers** on `PATH` — every "update" is a
+shell script that records how it was called and exits 0, and `sudo` is stubbed
+too, so the suite never elevates anything.
+
+That is what makes the safety properties testable rather than merely asserted:
+that `--check` queries without ever mutating, that `--no-<manager>` stops a
+manager being consulted at all, that a second instance refuses to start, that
+the lock is released on a clean exit.
+
+CI runs the suite on **Ubuntu and macOS**. The macOS runner is not decoration:
+this script is written to bash 3.2 because that is what macOS ships, and a
+Linux-only pipeline cannot prove that claim. Two further gates fail the build on
+bash 4+ syntax and on hardcoded home directories.
 
 ## Usage
 

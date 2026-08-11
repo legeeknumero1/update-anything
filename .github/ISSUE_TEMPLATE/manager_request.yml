@@ -1,0 +1,32 @@
+name: Package manager support
+description: Ask for a package manager that is not handled yet
+labels: [enhancement]
+body:
+  - type: input
+    id: manager
+    attributes:
+      label: Package manager
+      placeholder: "xbps, emerge, guix, port…"
+    validations:
+      required: true
+  - type: input
+    id: update
+    attributes:
+      label: Its non-interactive update command
+      placeholder: "sudo xbps-install -Su"
+    validations:
+      required: true
+  - type: input
+    id: check
+    attributes:
+      label: Its read-only "what would change" command, if any
+      description: Used by --check.
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything that makes it unusual
+      description: Prompts it asks, partial-upgrade hazards, whether it needs root.
+    validations:
+      required: false

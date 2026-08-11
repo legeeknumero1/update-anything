@@ -1,0 +1,34 @@
+name: Platform report
+description: Report whether it works on a platform other than Linux
+labels: [compatibility]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Development happens on Linux. macOS and the BSDs are written from
+        documentation and tested against stubs — real-world reports are the
+        most valuable thing you can send, working or not.
+  - type: dropdown
+    id: result
+    attributes:
+      label: Result
+      options:
+        - Works
+        - Works with caveats
+        - Does not work
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform and version
+      placeholder: "macOS 15.2 / FreeBSD 14.2 / OpenBSD 7.6"
+    validations:
+      required: true
+  - type: textarea
+    id: detail
+    attributes:
+      label: Details
+      description: Which managers were detected, what ran, and anything that misbehaved.
+    validations:
+      required: true

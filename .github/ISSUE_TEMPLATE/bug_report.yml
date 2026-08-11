@@ -1,0 +1,40 @@
+name: Bug report
+description: The script did something other than what it documents
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command you ran, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and version
+      placeholder: "CachyOS, macOS 15.2, FreeBSD 14.2…"
+    validations:
+      required: true
+  - type: input
+    id: bash
+    attributes:
+      label: Bash version
+      description: "`bash --version | head -1`"
+    validations:
+      required: true
+  - type: input
+    id: managers
+    attributes:
+      label: Package managers involved
+      placeholder: "pacman + flatpak + cargo"
+    validations:
+      required: false
+  - type: textarea
+    id: log
+    attributes:
+      label: Relevant log
+      description: "From `~/.local/share/update-anything/logs/`. Redact anything private."
+      render: shell
+    validations:
+      required: false
