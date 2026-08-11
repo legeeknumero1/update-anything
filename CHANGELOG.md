@@ -3,7 +3,7 @@
 Notable changes, newest first. Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.1] — 2026-08-11
 
 ### Added
 
@@ -39,4 +39,5 @@ Initial release: OS and package manager auto-detection, per-manager skip flags,
 `--check`, package snapshots, opt-in cleanup and firmware steps, shell
 completions for bash, zsh and fish, and an installer.
 
+[1.0.1]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.0.1
 [1.0.0]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.0.0

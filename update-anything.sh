@@ -40,7 +40,7 @@ set -uo pipefail
 # --- Constants --------------------------------------------------------------
 
 readonly SCRIPT_NAME="update-anything"
-readonly VERSION="1.0.0"
+readonly VERSION="1.0.1"
 readonly STATE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/${SCRIPT_NAME}"
 readonly LOG_DIR="${STATE_DIR}/logs"
 readonly SNAPSHOT_DIR="${STATE_DIR}/pkg-snapshots"
