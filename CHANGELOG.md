@@ -76,5 +76,6 @@ Initial release: OS and package manager auto-detection, per-manager skip flags,
 `--check`, package snapshots, opt-in cleanup and firmware steps, shell
 completions for bash, zsh and fish, and an installer.
 
+[1.1.0]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.1.0
 [1.0.1]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.0.1
 [1.0.0]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.0.0
