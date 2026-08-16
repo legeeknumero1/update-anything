@@ -55,8 +55,13 @@ whichever completion directory it actually finds — bash-completion, a zsh
 `$fpath` directory, fish. None are assumed present. `./install.sh --uninstall`
 removes everything it put there.
 
-Arch users can build from [`packaging/aur/PKGBUILD`](packaging/aur/PKGBUILD)
-with `makepkg -si`.
+Arch users can build from [`packaging/aur/PKGBUILD`](packaging/aur/PKGBUILD),
+which pins the release tarball by checksum and runs the full test suite as its
+`check()` step:
+
+```sh
+cd packaging/aur && makepkg -si
+```
 
 ## Usage
 
