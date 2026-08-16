@@ -226,6 +226,15 @@ claim. Two further gates fail the build on bash 4+ syntax and on hardcoded home
 directories, and ShellCheck runs at `-S style`, its strictest level, pinned to a
 fixed version so the gate cannot move on its own.
 
+## Design decisions
+
+The three trade-offs that shaped this, each with the options that were rejected
+and why:
+
+- [bash 3.2 as the baseline](docs/adr/0001-bash-3.2-as-the-baseline.md) — why not Python, Go, or a newer bash
+- [Report package holds, never reimplement them](docs/adr/0002-report-holds-never-reimplement-them.md) — why this tool owns no hold state of its own
+- [Parallelism limited to user-space managers](docs/adr/0003-parallelism-limited-to-user-space-managers.md) — why system managers stay in a line
+
 ## Contributing
 
 Adding a package manager is the most useful contribution, and
