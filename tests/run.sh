@@ -65,9 +65,14 @@ assert_exists() { if [ -e "$1" ]; then pass "$2"; else fail "$2 (missing: $1)"; 
 # list alone, so the host's real package managers are unreachable: inheriting
 # /usr/bin meant a test machine with pacman installed actually ran pacman, and
 # the result depended on what happened to be installed on it.
+#
+# `true` is here for the sudo keepalive specifically: it runs `sudo -n true` in
+# a loop, and without a real `true` to exec the stub sudo fails, the keepalive
+# exits, and the one condition test_parallel_does_not_wait_on_keepalive exists
+# to reproduce quietly stops existing.
 readonly SANDBOX_UTILS="bash sh date uname df awk sed grep find tee mkdir rmdir rm \
 cat cut head tail wc sort uniq diff hostname sleep kill tr basename dirname \
-mktemp chmod ls printf touch env id xargs"
+mktemp chmod ls printf touch env id xargs true"
 
 # A throwaway HOME plus stub package managers. Each stub appends its arguments
 # to a call log, so a test can assert both that a manager ran and how.
@@ -75,9 +80,15 @@ new_sandbox() {
     SANDBOX="$(mktemp -d)"
     mkdir -p "$SANDBOX/bin" "$SANDBOX/sysbin" "$SANDBOX/.config"
 
+    # type -P, not command -v: for anything that is also a shell builtin
+    # (true, printf, kill) command -v answers with the builtin's name, and
+    # ln -s then happily creates a symlink pointing at "true". The stub sudo
+    # runs /bin/sh, which needs the real binary — with a dangling link,
+    # `sudo -n true` failed, the keepalive died on its first iteration, and
+    # the parallel-hang regression could not reproduce at all.
     local util path
     for util in $SANDBOX_UTILS; do
-        path="$(command -v "$util" 2>/dev/null)" || continue
+        path="$(type -P "$util" 2>/dev/null)" || continue
         [ -n "$path" ] && ln -sf "$path" "$SANDBOX/sysbin/$util"
     done
 
@@ -487,6 +498,75 @@ test_config_is_honoured() {
     drop_sandbox
 }
 
+test_parallel_does_not_wait_on_keepalive() {
+    describe "parallel: the block does not wait on the sudo keepalive" || return 0
+    local home started elapsed
+    # -y rather than --check: --check never calls warm_sudo, so every earlier
+    # parallel test ran with no keepalive alive and could not see this. A bare
+    # `wait` waits for every background job of the shell, and the keepalive is
+    # a `while true` loop — this hung until sudo's timestamp lapsed, or forever.
+    home="$(new_sandbox cargo npm pipx uv pnpm)"; mkdir -p "$home/tmp"
+
+    started=$(date +%s)
+    run_in "$home" --yes >/dev/null 2>&1
+    elapsed=$(( $(date +%s) - started ))
+
+    if [ "$elapsed" -lt 30 ]; then
+        pass "returns as soon as the managers are done (${elapsed}s)"
+    else
+        fail "waited ${elapsed}s — the keepalive is being waited on again"
+    fi
+    drop_sandbox
+}
+
+test_no_parallel_when_a_prompt_is_possible() {
+    describe "parallel: no backgrounding when a step could still ask something" || return 0
+    local home out
+    home="$(new_sandbox cargo npm pipx uv pnpm)"; mkdir -p "$home/tmp"
+
+    # No --yes and no --check: a step may prompt. A backgrounded step has its
+    # stderr in a file, so `read -p` would ask into the file and the run would
+    # stop at a cursor with no visible question.
+    out="$(printf 'n\nn\nn\nn\nn\n' | run_in "$home" 2>&1)"
+    assert_absent_from "$out" "in parallel" "the parallel path is not taken"
+    drop_sandbox
+}
+
+test_parallel_output_is_logged_once() {
+    describe "parallel: output reaches the log exactly once" || return 0
+    local home log hits
+    home="$(new_sandbox cargo npm pipx uv pnpm)"; mkdir -p "$home/tmp"
+
+    run_in "$home" --yes >/dev/null 2>&1
+    log="$(find "$home/.local/share/update-anything/logs" -name 'update-*.log' | head -1)"
+    # The child appends to the log directly and run_step tees it; the capture
+    # was appended on top of both, so the whole parallel phase appeared twice,
+    # the second copy still carrying its terminal escape codes.
+    hits="$(grep -c 'pipx upgrade-all done' "$log" 2>/dev/null || echo 0)"
+    assert_eq "$hits" "1" "a completion line appears once, not twice"
+    drop_sandbox
+}
+
+test_timings_reach_the_log_even_when_quiet() {
+    describe "output: step timings are recorded, not just printed" || return 0
+    local home log
+    home="$(new_sandbox pacman)"; mkdir -p "$home/tmp"
+    # The report drops anything under a second, and a stub returns instantly,
+    # so a step has to actually take time for there to be a timing at all.
+    cat > "$home/bin/pacman" <<'EOF'
+#!/bin/sh
+sleep 2
+exit 0
+EOF
+    chmod +x "$home/bin/pacman"
+
+    run_in "$home" --yes --quiet >/dev/null 2>&1
+    log="$(find "$home/.local/share/update-anything/logs" -name 'update-*.log' | head -1)"
+    assert_contains "$(cat "$log" 2>/dev/null)" "[TIME]" \
+        "the timing report is in the log even with no terminal output"
+    drop_sandbox
+}
+
 # A stub whose "outdated" list is long enough to be folded. Everything else
 # about it matches the generic stub: silent, exits 0.
 long_output_brew() {
@@ -613,6 +693,10 @@ main() {
     test_parallel_failure_is_reported
     test_no_parallel_still_works
     test_no_parallel_is_not_a_manager
+    test_parallel_does_not_wait_on_keepalive
+    test_no_parallel_when_a_prompt_is_possible
+    test_parallel_output_is_logged_once
+    test_timings_reach_the_log_even_when_quiet
     test_log_written
     test_snapshot_before_changes
     test_config_is_honoured

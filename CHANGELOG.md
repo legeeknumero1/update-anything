@@ -3,6 +3,53 @@
 Notable changes, newest first. Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] — 2026-08-16
+
+Everything here came out of the first real (non-`--check`) run on a live
+machine. `--check` never requests sudo, so the test suite had never once
+exercised the code path that starts a sudo keepalive — and three of these four
+bugs live there.
+
+### Fixed
+
+- **The parallel block waited on the sudo keepalive.** `wait` with no
+  arguments waits for *every* background job of the shell, and `warm_sudo`
+  starts a `while true` keepalive that by design never exits on its own. The
+  parallel phase therefore blocked until sudo's timestamp lapsed: 28 seconds
+  of dead time on the run that exposed it, and on a machine whose timestamp
+  keeps being refreshed it would never return at all. Each child's PID is now
+  waited on individually.
+- **A step could stop and ask a question that was never displayed.** A
+  backgrounded step has its stdout and stderr redirected to a file, and
+  `read -p` writes its prompt to stderr — so a manager with something to
+  confirm asked into the file, and the run stopped at a bare cursor. Every
+  parallel job also shares one stdin, so even a visible prompt would have been
+  answered by whichever child read the keystroke first. Managers now run
+  concurrently only under `--yes` or `--check`, the two cases where no step
+  can prompt.
+- **The parallel phase was written to the log twice**, the second copy still
+  carrying its terminal escape codes. The children already append to the log
+  directly and `run_step` tees the command's own output; the captured stdout
+  was appended on top of both.
+- **`.pacnew` files were listed on the terminal but never logged.** The
+  warning ended with a colon and nothing followed it in the log — the one
+  place you would look afterwards to find out which config files need
+  merging.
+- **Step timings never reached the log**, and `--quiet` dropped them entirely.
+  The cron case, the only one where nobody watches it happen, was the case
+  that lost them.
+
+### Testing
+
+The suite now covers a real `--yes` run rather than only `--check`, which is
+what makes the keepalive path reachable at all. Four new cases, and one fix to
+the harness itself: sandbox utilities were resolved with `command -v`, which
+answers with the builtin's name for `true`, `printf` and `kill` — the symlink
+dangled, so the stub `sudo -n true` failed, the keepalive died on its first
+iteration, and the hang could not reproduce. `type -P` resolves the binary.
+
+Verified by putting each bug back and watching the new test fail.
+
 ## [1.1.0] — 2026-08-16
 
 ### Added
@@ -95,6 +142,7 @@ Initial release: OS and package manager auto-detection, per-manager skip flags,
 `--check`, package snapshots, opt-in cleanup and firmware steps, shell
 completions for bash, zsh and fish, and an installer.
 
+[1.1.1]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.1.1
 [1.1.0]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.1.0
 [1.0.1]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.0.1
 [1.0.0]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.0.0

@@ -5,7 +5,7 @@
 **One command that updates every package manager you actually have — on any Unix, without assuming which ones those are.**
 
 [![CI](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml/badge.svg)](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-50%20passing-brightgreen)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-54%20passing-brightgreen)](tests/run.sh)
 [![ShellCheck](https://img.shields.io/badge/shellcheck-strict-brightgreen)](https://www.shellcheck.net/)
 [![Bash 3.2](https://img.shields.io/badge/bash-3.2%20compatible-blue)](#portability)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
@@ -141,12 +141,19 @@ records everything. With the exit status above, that is what makes a cron entry
 usable — silent when it worked, loud when it did not.
 
 **Parallelism.** `cargo`, `npm`, `pipx`, `uv`, `pnpm` and `bun` need no
-elevation and touch separate trees, so they run concurrently: measured at 2s
-instead of 6s for three managers taking 2s each. System managers stay
-sequential on purpose — they share a package database and a sudo ticket, and
-running two at once is the corruption this script exists to avoid.
-`--no-parallel` puts them back in a line when you would rather watch the output
-live.
+elevation and touch separate trees, so they run concurrently under `--yes` or
+`--check`: measured at 2s instead of 6s for three managers taking 2s each.
+
+Only under those two flags, because they are the cases where no step can stop
+to ask you something. A backgrounded step has its output in a file, so its
+prompt would be asked into that file and the run would stop at a bare cursor —
+and every parallel job shares one stdin, so even a visible prompt would be
+answered by whichever child read the keystroke first. An interactive run stays
+sequential.
+
+System managers are never parallelised at all: they share a package database
+and a sudo ticket, and running two at once is the corruption this script exists
+to avoid. `--no-parallel` puts everything back in a line.
 
 **Readable output.** A routine upgrade on a Haskell-heavy repo produces 250
 lines of version bumps, which pushes every pre-flight result and the summary out
@@ -202,7 +209,7 @@ simply not checked.
 ## Tests
 
 ```sh
-./tests/run.sh              # 50 cases
+./tests/run.sh              # 54 cases
 ./tests/run.sh safety       # only cases whose name matches
 ```
 

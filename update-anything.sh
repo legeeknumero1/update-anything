@@ -47,7 +47,7 @@ set -uo pipefail
 # --- Constants --------------------------------------------------------------
 
 readonly SCRIPT_NAME="update-anything"
-readonly VERSION="1.1.0"
+readonly VERSION="1.1.1"
 readonly STATE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/${SCRIPT_NAME}"
 readonly LOG_DIR="${STATE_DIR}/logs"
 readonly SNAPSHOT_DIR="${STATE_DIR}/pkg-snapshots"
@@ -957,7 +957,19 @@ run_updates() {
   [[ "${#deferred[@]}" -eq 0 ]] && return 0
 
   # One left, or parallelism disabled: nothing to gain from the machinery.
-  if [[ "${#deferred[@]}" -eq 1 || "$NO_PARALLEL" -eq 1 ]]; then
+  #
+  # The third condition is the one that matters. A backgrounded step has its
+  # stdout and stderr redirected to a file, and `read -p` writes its prompt to
+  # stderr -- so a step that stops to ask something asks into the file, and the
+  # run simply stops with a cursor and no question. Every parallel job shares
+  # one stdin, so even a visible prompt would be answered by whichever child
+  # happened to read the keystroke first.
+  #
+  # Steps only prompt when they have something to apply and --yes was not
+  # given, so those two flags are exactly the condition under which no prompt
+  # can occur. Anywhere else, correctness beats the few seconds.
+  if [[ "${#deferred[@]}" -eq 1 || "$NO_PARALLEL" -eq 1 ]] ||
+    [[ "$ASSUME_YES" -eq 0 && "$CHECK_ONLY" -eq 0 ]]; then
     for mgr in "${deferred[@]}"; do
       "step_${mgr}"
     done
@@ -982,17 +994,33 @@ run_updates() {
   local started ended
   started=$(date +%s)
 
+  # Each child's PID is kept and waited on individually. A bare `wait` waits
+  # for every background job of this shell -- which includes the sudo
+  # keepalive started by warm_sudo, a `while true` loop that by design never
+  # exits on its own. That turned the parallel block into a wait for sudo's
+  # timestamp to lapse: on a real run it added 28 seconds, and on a machine
+  # whose timestamp keeps being refreshed it would never return at all. The
+  # test suite could not see it, because --check never starts a keepalive.
+  local -a pids=()
   for mgr in "${deferred[@]}"; do
     ("step_${mgr}" >"${tmpdir}/${mgr}.out" 2>&1; echo "$?" >"${tmpdir}/${mgr}.rc") &
+    pids+=("$!")
   done
-  wait
+  local pid
+  for pid in "${pids[@]}"; do
+    wait "$pid"
+  done
 
   ended=$(date +%s)
 
   for mgr in "${deferred[@]}"; do
     section "$mgr"
+    # Terminal only. Every one of these lines is already in the log: the
+    # child's info()/success() append to it directly, and run_step tees the
+    # command's own output. Appending the capture as well wrote the whole
+    # parallel phase to the log twice, the second copy still carrying its
+    # terminal escape codes.
     [[ -s "${tmpdir}/${mgr}.out" ]] && cat "${tmpdir}/${mgr}.out"
-    cat "${tmpdir}/${mgr}.out" >>"$LOG_FILE" 2>/dev/null
 
     # A step that failed inside a subshell cannot append to FAILED_STEPS in
     # this one, so its status is carried back through a file instead.
@@ -1018,7 +1046,7 @@ check_pacnew() {
   if [[ -n "$pacnew_files" ]]; then
     warn "New .pacnew config files were created. Review and merge them manually"
     warn "(e.g. with 'pacdiff'). This script will not auto-merge configs:"
-    echo "$pacnew_files"
+    preview_list "pending .pacnew files" "$pacnew_files"
   else
     success "No pending .pacnew files."
   fi
@@ -1252,10 +1280,11 @@ Options:
   -q, --quiet       Print only warnings and errors. The log is unaffected,
                      so a cron job stays silent when it worked and speaks up
                      when it did not.
-  --no-parallel     Run user-space managers one at a time. They are run
-                     concurrently by default, since none of them need root
-                     or share state; use this if you want readable live
-                     output instead.
+  --no-parallel     Run user-space managers one at a time. With --yes or
+                     --check they run concurrently, since none of them need
+                     root or share state; an interactive run is always
+                     sequential, because a backgrounded step cannot show you
+                     a prompt. Use this if you want readable live output.
   --full            Print every pending update. By default the terminal gets
                      the first 20 lines and a count of the rest, so a
                      250-package upgrade does not push the summary out of
@@ -1420,12 +1449,19 @@ section "Summary"
 
 # Where the time actually went. Sorted longest first, because the only reason
 # to read this is to find out what to skip next time.
-if [[ "${#STEP_TIMINGS[@]}" -gt 0 && "$QUIET" -eq 0 ]]; then
-  printf '%s\n' "${STEP_TIMINGS[@]}" \
+if [[ "${#STEP_TIMINGS[@]}" -gt 0 ]]; then
+  # Rendered once, then shown and recorded from the same string. Written
+  # straight to stdout before, it was the one part of a run that --quiet
+  # dropped without the log keeping a copy -- so the cron case, the only one
+  # where nobody watched it happen, was the case that lost it.
+  TIMING_REPORT=$(printf '%s\n' "${STEP_TIMINGS[@]}" \
     | awk -F= '$2 >= 1 { printf "%6ds  %s\n", $2, $1 }' \
     | sort -rn \
-    | head -10
-  echo
+    | head -10)
+  if [[ -n "$TIMING_REPORT" ]]; then
+    [[ "$QUIET" -eq 0 ]] && printf '%s\n\n' "$TIMING_REPORT"
+    printf '%s [TIME]\n%s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$TIMING_REPORT" >>"$LOG_FILE"
+  fi
 fi
 
 if [[ "${#FAILED_STEPS[@]}" -eq 0 ]]; then

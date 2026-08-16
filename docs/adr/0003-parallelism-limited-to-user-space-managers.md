@@ -40,6 +40,24 @@ through the `.rc` file — a subshell cannot set a variable in its parent, and a
 failure that does not reach `FAILED_STEPS` is a failure the exit status lies
 about.
 
+## Amendment (2026-08-16, after the first real run)
+
+Two things this ADR did not account for, both found on a live machine rather
+than in the suite:
+
+`wait` with no arguments waits for every background job of the shell, not just
+the ones this block started — including the sudo keepalive, which never exits
+on its own. The parallel phase blocked until sudo's timestamp lapsed. Children
+are now waited on by PID.
+
+More importantly, "needs no root" does not imply "never asks anything". A
+backgrounded step has its stderr in a file, so `read -p` prompts into the file
+and the run stops at a cursor with no question on screen; and all the jobs
+share one stdin. Parallelism is therefore restricted further, to `--yes` and
+`--check` — the two cases where no step can prompt. That keeps the win where it
+is worth having, which is the unattended run, and gives it up where correctness
+is at stake.
+
 ## Consequences
 
 Measured at 2s instead of 6s for three managers taking 2s each.
