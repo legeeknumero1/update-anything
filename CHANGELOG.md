@@ -50,7 +50,7 @@ and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
-- **20-case test suite** running the script against stub package managers in a
+- **23-assertion test suite** running the script against stub package managers in a
   throwaway `HOME`, so its safety properties are verified rather than asserted:
   that `--check` queries without mutating, that `--no-<manager>` stops a manager
   being consulted at all, that a second instance refuses to start, that the lock
