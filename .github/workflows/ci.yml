@@ -11,7 +11,7 @@ jobs:
     name: ShellCheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # Pinned rather than taken from the runner image. ShellCheck's checks
       # change between releases — an older one reports SC2317 where a newer one
@@ -38,7 +38,7 @@ jobs:
     name: Syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Parse every script
         run: |
           for f in update-anything.sh install.sh tests/run.sh; do
@@ -55,7 +55,7 @@ jobs:
         # because that is what macOS ships, and only a macOS runner proves it.
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Run the test suite
         run: NO_COLOR=1 ./tests/run.sh
 
@@ -63,7 +63,7 @@ jobs:
     name: Portability
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # The script promises to run on macOS, which ships bash 3.2. These four
       # constructs are the usual way a script silently stops working there.
