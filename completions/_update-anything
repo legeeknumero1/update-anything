@@ -17,6 +17,7 @@ _arguments \
   '--only[Update only these managers (repeatable, comma-separated)]:manager:(pacman apt dnf yum zypper apk brew macports pkg pkg_add flatpak snap nix cargo npm pipx uv pnpm bun)' \
   '(-q --quiet)'{-q,--quiet}'[Print only warnings and errors]' \
   '--no-parallel[Run user-space managers one at a time]' \
+  '--full[Print every pending update, not just the first 20]' \
   '--no-pacman[Skip pacman + AUR]' \
   '--no-apt[Skip apt]' \
   '--no-dnf[Skip dnf]' \

@@ -1,0 +1,59 @@
+# Maintainer: legeeknumero1 <enzomaison20@gmail.com>
+
+pkgname=update-anything
+pkgver=1.1.0
+pkgrel=1
+pkgdesc="Update every package manager actually installed, on any Unix, without assuming any of them are present"
+arch=('any')
+url="https://github.com/legeeknumero1/update-anything"
+license=('GPL-3.0-or-later')
+
+# One script, one dependency. Everything it drives is discovered at runtime
+# with command -v, so no package manager belongs in depends(): declaring
+# pacman here would be declaring that this tool is for Arch, which is the one
+# thing it is written not to assume.
+depends=('bash')
+
+optdepends=(
+  'sudo: required by every package manager that needs root'
+  'curl: connectivity pre-flight check (falls back to wget, then /dev/tcp)'
+  'pacman-contrib: preview pending pacman updates before applying them'
+  'arch-audit: --audit, a CVE check against installed packages'
+  'needrestart: list services still running outdated libraries after an update'
+  'fwupd: --firmware, firmware updates via fwupdmgr'
+  'snapper: --snapshot, a filesystem snapshot before updating'
+  'timeshift: --snapshot, an alternative snapshot backend'
+  'networkmanager: warn before downloading over a metered connection'
+)
+
+checkdepends=('shellcheck')
+
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+check() {
+  cd "$srcdir/$pkgname-$pkgver" || exit 1
+  # The same two gates the project's CI enforces, so a tree that would fail
+  # upstream never reaches a user through the AUR either.
+  shellcheck -s bash -S style update-anything.sh install.sh tests/run.sh \
+    completions/update-anything.bash
+  ./tests/run.sh
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver" || exit 1
+
+  install -Dm755 update-anything.sh "$pkgdir/usr/bin/update-anything"
+
+  install -Dm644 completions/update-anything.bash \
+    "$pkgdir/usr/share/bash-completion/completions/update-anything"
+  install -Dm644 completions/_update-anything \
+    "$pkgdir/usr/share/zsh/site-functions/_update-anything"
+  install -Dm644 completions/update-anything.fish \
+    "$pkgdir/usr/share/fish/vendor_completions.d/update-anything.fish"
+
+  install -Dm644 config.example "$pkgdir/usr/share/doc/$pkgname/config.example"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
+  install -Dm644 CHANGELOG.md "$pkgdir/usr/share/doc/$pkgname/CHANGELOG.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -3,7 +3,7 @@
 Notable changes, newest first. Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] — 2026-08-11
+## [1.1.0] — 2026-08-16
 
 ### Added
 
@@ -26,6 +26,25 @@ and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   usable from cron — silent when it worked, loud when it did not.
 - **Per-step timings** in the summary, longest first, so it is obvious what to
   skip next time.
+
+### Changed
+
+- **Long pending-update lists are folded.** A routine upgrade on a
+  Haskell-heavy repo prints 250 lines of version bumps, pushing every
+  pre-flight result and the summary out of the scrollback — the part worth
+  reading is the part that scrolls away. The terminal now gets the first 20
+  lines and a count of the rest; the log still gets every line, and `--full`
+  prints them all. Measured on a real run: 326 lines of output down to 80.
+- `brew update` is called with `--quiet`, which drops the "New Formulae" and
+  "New Casks" listing it prints in full on every single run — forty-odd lines
+  about packages nobody asked about, ahead of the handful that are actually
+  outdated. Nothing else about brew's output changes.
+
+### Project
+
+- A demo GIF of a real `--check` run, and an AUR `PKGBUILD`.
+- `CONTRIBUTING.md` now walks through the four places adding a package manager
+  touches, with a worked example.
 
 ## [1.0.1] — 2026-08-11
 

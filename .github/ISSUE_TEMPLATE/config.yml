@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: A package manager itself failed (pacman, apt, brew, ...)
+    url: https://github.com/legeeknumero1/update-anything/blob/main/README.md#threat-model
+    about: >
+      This script drives package managers, it does not replace them. If the
+      manager's own command fails or refuses, that belongs upstream — open an
+      issue here only if the wrapper called it wrongly.

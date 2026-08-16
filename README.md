@@ -1,204 +1,232 @@
+<div align="center">
+
 # update-anything
 
+**One command that updates every package manager you actually have — on any Unix, without assuming which ones those are.**
+
 [![CI](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml/badge.svg)](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-44%20passing-brightgreen)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-50%20passing-brightgreen)](tests/run.sh)
 [![ShellCheck](https://img.shields.io/badge/shellcheck-strict-brightgreen)](https://www.shellcheck.net/)
+[![Bash 3.2](https://img.shields.io/badge/bash-3.2%20compatible-blue)](#portability)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
-A single portable bash script that updates every package manager actually
-installed on the machine, on any Unix (Linux, macOS, FreeBSD, OpenBSD),
-without assuming any of them are present.
+<img src="docs/demo.gif" alt="update-anything --check on a CachyOS machine: pre-flight checks, pacman and AUR previews, then cargo, npm, pipx, uv and pnpm running in parallel" width="900">
 
-## 1. Purpose
+<sub>A real `--check` run: nothing is modified. Pre-flight checks, then every detected manager — pacman, AUR, Homebrew — followed by the user-space ones running concurrently.</sub>
 
-Running `update-anything.sh` detects the OS and probes for every supported
-package manager with `command -v`. Whatever isn't installed is silently
-skipped; whatever is installed gets checked for updates, previewed, and
-(after confirmation) upgraded. Nothing is hardcoded as "the" package
-manager for a given OS -- a machine with both Homebrew and MacPorts gets
-both updated, a minimal container with only `apk` gets only `apk`.
+</div>
 
-Supported so far: `pacman` (+ AUR via yay/paru/pikaur/trizen/aurman/pamac),
-`apt`, `dnf`, `yum`, `zypper`, `apk`, Homebrew, MacPorts, FreeBSD `pkg`,
-OpenBSD `pkg_add`, Flatpak, Snap, Nix, `cargo` (auto-uses `cargo-binstall`
-as a backend when present), `uv`, `pnpm`, `bun`, global `npm`, `pipx`.
+---
 
-## 2. Requirements
+## What this is
 
-- `bash` (written against 3.2 syntax -- works with macOS's stock bash, no
-  need for a newer one from Homebrew).
-- `sudo`, only if a detected manager needs root (most system package managers
-  do; Homebrew, MacPorts on macOS, cargo, npm, pipx don't). It is asked for
-  **once**, up front, then kept alive in the background for the whole run -- a
-  long AUR build never stops to ask again halfway through.
-- `curl` recommended for the connectivity check (falls back to `wget`,
-  then to bash's `/dev/tcp`).
-
-## 3. Install
+A single bash script. It detects the OS, probes for every supported package
+manager with `command -v`, and updates the ones that are actually there.
+Nothing is hardcoded as "the" package manager for a platform: a Mac with both
+Homebrew and MacPorts gets both, an Alpine container with only `apk` gets only
+`apk`, and a machine without `flatpak` never hears about flatpak.
 
 ```
-git clone https://github.com/legeeknumero1/update-anything && cd update-anything
+pacman (+ AUR: yay, paru, pikaur, trizen, aurman, pamac)   apt   dnf   yum
+zypper   apk   Homebrew   MacPorts   FreeBSD pkg   OpenBSD pkg_add
+Flatpak   Snap   Nix   cargo (via cargo-binstall when present)   uv
+pnpm   bun   npm (global)   pipx
+```
+
+The interesting part of a tool like this is not the list. It is what it refuses
+to do — see [Threat model](#threat-model).
+
+## Quick start
+
+```sh
+git clone https://github.com/legeeknumero1/update-anything
+cd update-anything
 ./install.sh
-update-anything --help
+update-anything --check      # dry run: queries everything, changes nothing
 ```
 
-`install.sh` copies a local checkout into `~/.local/bin`. There is deliberately
-no `curl | bash` one-liner: piping a remote script straight into a shell is a
-poor habit to encourage, and doubly so for a tool that goes on to invoke package
-managers through `sudo`. Clone it, read it, then install it.
+There is deliberately no `curl | bash` one-liner. Piping a remote script
+straight into a shell is a poor habit to encourage, and doubly so for a tool
+that goes on to invoke package managers through `sudo`. Clone it, read it, then
+install it.
 
-`install.sh` also installs shell completions into whichever completion
-directory it actually finds (bash-completion, an existing zsh `$fpath` dir,
-fish) -- none are assumed present. Run `./install.sh --uninstall` to remove
-the binary and any completions it installed.
+`install.sh` copies the script into `~/.local/bin` and installs completions into
+whichever completion directory it actually finds — bash-completion, a zsh
+`$fpath` directory, fish. None are assumed present. `./install.sh --uninstall`
+removes everything it put there.
 
-Every push and pull request runs ShellCheck at its strictest level, a syntax
-parse, the test suite on both Linux and macOS, and two gates that reject bash
-4+ syntax and hardcoded home directories. See [Tests](#tests).
+Arch users can build from [`packaging/aur/PKGBUILD`](packaging/aur/PKGBUILD)
+with `makepkg -si`.
 
-## 4. Advanced, opt-in features
+## Usage
 
-Everything below is off by default. A plain `update-anything` run never
-triggers any of it -- these exist for power users who explicitly ask for
-them via a flag or by placing files in a specific directory.
+```sh
+update-anything --check              # dry run, changes nothing
+update-anything                      # interactive: previews, then asks
+update-anything -y                   # skip this script's own prompts
+update-anything --only flatpak,cargo # just these two, ignore the rest
+update-anything --no-snap --no-brew  # everything except these
+update-anything -y --quiet           # what a cron entry looks like
+update-anything --clean --orphans    # also clean caches / remove orphans (asks first)
+update-anything --rollback           # diff the last two package snapshots
+```
 
-- **`--snapshot`** -- creates a system-level restore point before touching
-  anything, using the first tool found: `snapper`, `timeshift`, `bectl`
-  (FreeBSD boot environments), a ZFS root dataset (detected via `findmnt`,
-  not a hardcoded pool name), or `tmutil` on macOS. Still asks for
-  confirmation even under `--snapshot`, since e.g. Timeshift can take
-  several minutes and real disk space depending on its backend.
-- **`--deep-clean`** -- prunes dev/container residue after updating:
-  unused Flatpak runtimes, dangling Docker/Podman images, `cargo-cache`'s
-  git/registry caches, Go's build/module cache. Each tool gets its own
-  confirmation, same pattern as `--clean`/`--orphans`.
-- **`--inhibit-sleep`** -- re-executes itself once under `systemd-inhibit`
-  (Linux) or `caffeinate` (macOS) so a lid-close or idle timeout doesn't
-  kill a long AUR build or Homebrew compile mid-way.
-- **Hooks** -- executable scripts in
-  `~/.config/update-anything/hooks.d/pre-update/` and `.../post-update/`
-  run in filename order, as your own user (this script never elevates
-  them). Same trust model as pacman hooks or shell rc files: whatever you
-  put there, under your own `$HOME`, runs with your own permissions.
-  Non-executable files are skipped with a warning rather than silently run.
-- **Webhook** -- set `UPDATE_ANYTHING_WEBHOOK_URL` to a Discord/Slack-style
-  webhook URL to get a one-line status ping (hostname + outcome) at the
-  end of a run. Unset by default; nothing is ever sent anywhere unless you
-  explicitly set this.
-- Post-update, if `needrestart` is installed, the script lists services
-  still holding outdated libraries in memory and offers to restart just
-  those, instead of only flagging "reboot needed" for kernel updates.
-- **Config file** -- `~/.config/update-anything/config`, if present, is
-  sourced as shell code before CLI flags are parsed, so flags always win.
-  Same trust model as hooks.d/ or your shell rc files -- it's real shell
-  code, not a restricted `key=value` parser. Copy `config.example` from
-  this repo to get started (`cp config.example ~/.config/update-anything/config`);
-  it documents every available toggle. Example:
-  ```
-  DO_NOTIFY=1
-  UPDATE_ANYTHING_WEBHOOK_URL="https://discord.com/api/webhooks/..."
-  ```
-- **`--audit`** -- runs `arch-audit` if present (a real system-wide CVE
-  check against installed pacman packages). `cargo audit` only runs if a
-  `Cargo.lock` exists in the current directory, since it's a project-level
-  tool, not a system scanner -- `npm audit` isn't run at all for the same
-  reason (no meaningful "global" mode). If neither applies, it says so
-  instead of pretending to have audited anything.
-- **`--only <manager>`** -- the inverse of `--no-<manager>`: update only what
-  you name, ignoring everything else. Repeatable and comma-separated
-  (`--only flatpak,cargo`), and authoritative if both are given.
-- **`-q`/`--quiet`** -- only warnings and errors reach the terminal; the log
-  keeps everything. Combined with the exit status below, that is what makes
-  this usable from cron: silent when it worked, loud when it did not.
-- **`--no-parallel`** -- user-space managers (`cargo`, `npm`, `pipx`, `uv`,
-  `pnpm`, `bun`) run concurrently by default, since none need root and none
-  share state; measured at 2s rather than 6s for three managers taking 2s each.
-  System managers always stay sequential -- they share a package database and a
-  sudo ticket. Use this flag when you would rather watch their output live.
-- **Held packages are reported** at the start of every run: `pacman` `IgnorePkg`,
-  `apt-mark hold`, `dnf versionlock`, `brew pin`, `flatpak mask`. This script
-  never adds a hold and never overrides one -- that state belongs to the manager
-  that owns it, and duplicating it here would just be a second place to get it
-  wrong. Reporting it stops a package that never moves from being a mystery.
-- **`--rollback`** -- diffs the last two package-list snapshots and exits.
-  This is intentionally just a diff, not an automated downgrade: generating
-  a correct downgrade command per package (right cached version, right
-  syntax per package manager) is a project of its own, not a flag.
-- Metered-connection check (Linux only, via `nmcli`) warns before a large
-  download if the active connection is flagged as metered (e.g. a phone's
-  mobile hotspot). No macOS equivalent is faked -- there's no reliable CLI
-  signal for "this is a hotspot" on macOS, so it's just not checked there.
+`update-anything --help` lists every flag.
 
-## 5. Threat model
+### Exit status
+
+| Code | Meaning |
+|---|---|
+| 0 | every requested step succeeded, including `--check`, `--help`, `--version` |
+| 1 | a step failed, or a pre-flight check refused to start (no network, low disk, low battery, another instance running, run as root, unknown flag) |
+| 130 | interrupted |
+
+Set explicitly rather than inherited from whatever ran last, so this is safe in
+a cron job or chained with `&&`.
+
+## Threat model
+
+This is the section worth reading. A script that runs `sudo pacman -Syu`
+unattended on your machine earns its trust by what it declines to do.
 
 | Risk | Mitigation |
 |---|---|
-| Partial upgrade corrupts the system (Arch-class distros explicitly warn against this) | Always full `-Syu`/`full-upgrade`/`upgrade`, never a scoped package list |
-| Script silently answers "yes" to a package manager's own destructive prompt (replace/remove/conflict) | `--yes` only skips *this script's* confirmations; `--noconfirm`/`-y` is never passed to pacman, apt, dnf, zypper, apk, yay, paru |
-| Two instances run concurrently, race on the package DB | `mkdir`-based atomic lock (portable, no `flock` dependency) |
-| Disk fills up mid-transaction | Aborts before starting if free space on `/` is critically low |
-| Runs as root, breaking AUR helpers / Homebrew (which refuse to run as root) or masking `sudo`-scoped intent | Refuses to start as root; calls `sudo` itself only where a specific manager needs it |
-| Silent data loss on orphan removal / cache cleanup | Both are opt-in flags (`--orphans`, `--clean`), always list what will be removed and ask for confirmation first |
-| No way to know what changed if something breaks | Snapshot of installed packages + full timestamped log written before touching anything (`~/.local/share/update-anything/`, auto-purged after 30 days) |
-| Offline run leaves package DBs half-synced | Aborts before starting if connectivity check fails |
-| Laptop loses power mid-transaction, corrupting the package DB | Aborts if battery <10% and discharging (Linux `/sys/class/power_supply`, macOS `pmset`); warns under 20%. Silently skipped on desktops (no battery found) |
-| Hooks execute arbitrary code | Hooks only run from a directory under the invoking user's own `$HOME`, as that user (never elevated); non-executable files are skipped with a warning instead of being run |
-| Webhook silently exfiltrates data | Nothing is ever sent anywhere unless `UPDATE_ANYTHING_WEBHOOK_URL` is explicitly set; payload is just hostname + pass/fail status |
-| A slow AUR/Homebrew build gets killed by the system sleeping | `--inhibit-sleep` wraps the run in `systemd-inhibit`/`caffeinate`, opt-in only (never silently re-execs itself unless asked) |
-| `--snapshot` silently eats minutes/disk space | Still asks for confirmation even when the flag is passed; only ever tries one detected tool, never several |
-| Config file could be mistaken for a safe declarative format | Documented plainly as real sourced shell code (same trust level as hooks.d/), not a restricted parser |
-| `--rollback` misused as an automatic downgrade tool | Deliberately scoped to a diff only; no downgrade command is generated or run |
+| Partial upgrade corrupts the system (Arch-class distros explicitly warn against this) | Always a full `-Syu`/`full-upgrade`/`upgrade`, never a scoped package list |
+| The script silently answers "yes" to a package manager's own destructive prompt (replace/remove/conflict) | `--yes` skips *this script's* confirmations only. `--noconfirm`/`-y` is never passed to pacman, apt, dnf, zypper, apk, yay or paru |
+| Two instances race on the package database | `mkdir`-based atomic lock — portable, no `flock` dependency |
+| Disk fills mid-transaction | Aborts before starting if free space on `/` is critically low |
+| Running as root breaks AUR helpers and Homebrew, or masks `sudo`-scoped intent | Refuses to start as root; calls `sudo` itself, only where a manager needs it |
+| Silent data loss from orphan removal or cache cleanup | Both opt-in (`--orphans`, `--clean`); both list what will go and ask first |
+| No way to know what changed when something breaks | A package snapshot and a timestamped log are written *before* anything is touched (`~/.local/share/update-anything/`, purged after 30 days) |
+| An offline run leaves package databases half-synced | Aborts before starting if the connectivity check fails |
+| Power loss mid-transaction corrupts the package database | Aborts under 10% battery and discharging; warns under 20%. Skipped silently on desktops |
+| Hooks execute arbitrary code | Hooks run only from a directory under the invoking user's own `$HOME`, as that user, never elevated. Non-executable files are skipped with a warning rather than run |
+| A webhook exfiltrates data | Nothing is sent anywhere unless `UPDATE_ANYTHING_WEBHOOK_URL` is set by you; the payload is hostname plus pass/fail |
+| A slow AUR or Homebrew build is killed by the system sleeping | `--inhibit-sleep` wraps the run in `systemd-inhibit`/`caffeinate` — opt-in; it never re-execs itself unless asked |
+| `--snapshot` quietly eats minutes and disk | Still asks for confirmation even when the flag is passed, and only ever tries one detected backend |
+| The config file is mistaken for a safe declarative format | Documented as real sourced shell code, same trust level as `hooks.d/`, not a restricted parser |
+| `--rollback` mistaken for an automatic downgrade | Deliberately a diff only. No downgrade command is generated or run |
+| A held package is upgraded behind your back | Holds are read from each manager and reported, never overridden — see below |
+
+## Held packages
+
+`pacman`'s `IgnorePkg`, `apt-mark hold`, `dnf versionlock`, `brew pin` and
+`flatpak mask` are read and listed at the start of a run.
+
+This script never adds a hold and never works around one. That state belongs to
+the manager that owns it, and a second copy here would only be a second place to
+get it wrong. What it does is stop a held package from being a mystery: without
+this, a package simply never moves and nothing says why.
+
+Managers you deselected with `--no-<manager>` are not consulted at all —
+`--no-flatpak` has to mean flatpak is not touched, not merely that it goes
+un-upgraded.
+
+## Beyond the defaults
+
+Everything here is off unless you ask for it. A plain `update-anything` run
+triggers none of it.
+
+**Selecting what runs.** `--only <manager>` is the inverse of
+`--no-<manager>`: repeatable, comma-separated, and authoritative when both are
+given, so combining them never depends on parse order.
+
+**`-q`/`--quiet`.** Only warnings and errors reach the terminal; the log still
+records everything. With the exit status above, that is what makes a cron entry
+usable — silent when it worked, loud when it did not.
+
+**Parallelism.** `cargo`, `npm`, `pipx`, `uv`, `pnpm` and `bun` need no
+elevation and touch separate trees, so they run concurrently: measured at 2s
+instead of 6s for three managers taking 2s each. System managers stay
+sequential on purpose — they share a package database and a sudo ticket, and
+running two at once is the corruption this script exists to avoid.
+`--no-parallel` puts them back in a line when you would rather watch the output
+live.
+
+**Readable output.** A routine upgrade on a Haskell-heavy repo produces 250
+lines of version bumps, which pushes every pre-flight result and the summary out
+of the scrollback — so the part worth reading is the part that scrolls away. The
+terminal gets the first 20 lines and a count; the log always gets all of them,
+and `--full` prints everything.
+
+**`--snapshot`.** A system-level restore point before anything is touched, using
+the first backend found: `snapper`, `timeshift`, `bectl` (FreeBSD boot
+environments), a ZFS root dataset (detected through `findmnt`, not a hardcoded
+pool name), or `tmutil` on macOS. It still asks first, since Timeshift can take
+minutes and real disk space depending on its backend.
+
+**`--deep-clean`.** Prunes dev and container residue after updating: unused
+Flatpak runtimes, dangling Docker/Podman images, `cargo-cache`'s git and
+registry caches, Go's build and module cache. Each tool gets its own
+confirmation.
+
+**`--audit`.** Runs `arch-audit` if present — a real system-wide CVE check
+against installed packages. `cargo audit` runs only when a `Cargo.lock` exists
+in the current directory, because it is a project-level tool, not a system
+scanner. `npm audit` is not run at all, for the same reason. If neither applies,
+it says so rather than pretending to have audited anything.
+
+**`--inhibit-sleep`.** Re-executes once under `systemd-inhibit` (Linux) or
+`caffeinate` (macOS), so a lid close does not kill a long AUR build.
+
+**`--rollback`.** Diffs the last two package snapshots. Deliberately just a
+diff: generating a correct downgrade command per package — right cached version,
+right syntax per manager — is a project of its own, not a flag.
+
+**Hooks.** Executable scripts in
+`~/.config/update-anything/hooks.d/pre-update/` and `.../post-update/` run in
+filename order, as you, never elevated. Same trust model as pacman hooks or your
+shell rc files.
+
+**Config file.** `~/.config/update-anything/config` is sourced as shell code
+before flags are parsed, so flags always win. Copy `config.example` to get
+started — it documents every toggle.
+
+**Webhook.** Set `UPDATE_ANYTHING_WEBHOOK_URL` for a one-line status ping
+(hostname plus outcome) at the end of a run. Unset by default.
+
+**Post-update.** If `needrestart` is installed, services still holding outdated
+libraries in memory are listed, with an offer to restart just those — rather
+than only flagging "reboot needed" for kernel updates.
+
+**Metered connections.** On Linux, `nmcli` is asked whether the active
+connection is metered, and you get a warning before a large download. No macOS
+equivalent is faked: there is no reliable CLI signal for it there, so it is
+simply not checked.
 
 ## Tests
 
 ```sh
-./tests/run.sh              # 44 cases
-./tests/run.sh safety       # only cases matching a name
+./tests/run.sh              # 50 cases
+./tests/run.sh safety       # only cases whose name matches
 ```
 
 Nothing in the suite updates anything. Each case runs the script against a
-throwaway `HOME` with **stub package managers** on `PATH` — every "update" is a
+throwaway `HOME` with **stub package managers** on `PATH`: every "update" is a
 shell script that records how it was called and exits 0, and `sudo` is stubbed
-too, so the suite never elevates anything.
+too, so the suite never elevates anything and never reaches the network.
 
-That is what makes the safety properties testable rather than merely asserted:
-that `--check` queries without ever mutating, that `--no-<manager>` stops a
-manager being consulted at all, that a second instance refuses to start, that
-the lock is released on a clean exit.
+That is what makes the safety properties testable rather than merely asserted —
+that `--check` queries without mutating, that `--no-<manager>` stops a manager
+being consulted at all, that a second instance refuses to start, that the lock
+is released on a clean exit, and that a folded output list is still complete in
+the log.
 
-CI runs the suite on **Ubuntu and macOS**. The macOS runner is not decoration:
-this script is written to bash 3.2 because that is what macOS ships, and a
-Linux-only pipeline cannot prove that claim. Two further gates fail the build on
-bash 4+ syntax and on hardcoded home directories.
+### Portability
 
-## Exit status
+The script is written to **bash 3.2** — no associative arrays, no `mapfile`, no
+`${var,,}`, no `local -n` — because that is the bash macOS still ships. CI runs
+the suite on **Ubuntu and macOS**; a Linux-only pipeline could not prove that
+claim. Two further gates fail the build on bash 4+ syntax and on hardcoded home
+directories, and ShellCheck runs at `-S style`, its strictest level, pinned to a
+fixed version so the gate cannot move on its own.
 
-| Code | Meaning |
-|---|---|
-| 0 | every requested step succeeded, including `--check`, `--help` and `--version` |
-| 1 | a step failed, or a pre-flight check refused to start (no network, low disk, low battery, another instance already running, run as root, unknown flag) |
-| 130 | interrupted |
+## Contributing
 
-Set explicitly rather than inherited from whatever ran last, so this is safe to
-put in a cron job or chain with `&&`.
-
-## Usage
-
-```
-update-anything --check          # dry run, changes nothing
-update-anything                  # interactive full update
-update-anything -y                # skip this script's own prompts
-update-anything --clean --orphans # also clean cache / remove orphans (asks first)
-update-anything --no-snap --no-brew
-update-anything --only flatpak,cargo # update just these two, ignore the rest
-update-anything -y --quiet         # what a cron entry looks like
-update-anything --snapshot --inhibit-sleep --deep-clean
-update-anything --audit --check    # see known CVEs in installed packages, change nothing
-update-anything --rollback         # diff the last two package snapshots
-```
-
-See `update-anything --help` for the full flag list.
+Adding a package manager is the most useful contribution, and
+[CONTRIBUTING.md](CONTRIBUTING.md) walks through the four places a new one
+touches. Security issues go through [SECURITY.md](SECURITY.md).
 
 ## License
 
-This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+GNU General Public License v3.0 — see [LICENSE](LICENSE).

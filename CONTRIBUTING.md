@@ -58,6 +58,54 @@ are flags, never defaults.
 explaining why the portable form was chosen over the obvious one is what stops
 someone "simplifying" it back.
 
+## Adding a package manager
+
+The most common change, and it touches four places. Take `flatpak` as the
+worked example.
+
+**1. Detection.** One line in `detect_managers()`, and it must be a probe, never
+an assumption about the platform:
+
+```bash
+command -v flatpak >/dev/null 2>&1 && MANAGERS+=("flatpak")
+```
+
+If the binary name and the manager name differ (`apt-get` → `apt`), the
+`MANAGERS` entry is what every flag and message uses.
+
+**2. The step.** A `step_<name>()` function — dispatched by name, so `flatpak`
+means `step_flatpak`. It has to honour `CHECK_ONLY` by returning before it
+mutates anything, ask through `confirm` before it does, and hand the real work
+to `run_step` so failures are recorded without aborting the run:
+
+```bash
+step_flatpak() {
+  info "Checking flatpak updates..."
+  [[ "$CHECK_ONLY" -eq 1 ]] && { flatpak remote-ls --updates; return 0; }
+  confirm "Apply flatpak updates?" || { warn "Skipped flatpak by user choice."; return 0; }
+  run_step "flatpak update" flatpak update
+}
+```
+
+Long pending lists go through `preview_list` rather than a bare `echo`, so the
+terminal stays readable and the log stays complete.
+
+**3. Completions.** All three: `completions/update-anything.bash`,
+`completions/_update-anything`, `completions/update-anything.fish`. `--no-<name>`
+is generic in the parser, but it still has to be listed to be completable.
+
+**4. A test.** At minimum that `--check` does not mutate and that `--no-<name>`
+suppresses it entirely. `new_sandbox flatpak` gives you a stub that records how
+it was called:
+
+```bash
+run_in "$home" --check --yes >/dev/null 2>&1
+assert_absent_from "$(calls_in "$home")" "flatpak update" "never told to update"
+```
+
+Then the README's supported list, and a `CHANGELOG.md` entry under
+`## [Unreleased]`.
+
 ## Commits
 
 Conventional Commits (`feat:`, `fix:`, `docs:`, `ci:`, `refactor:`). Say in the

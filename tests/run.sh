@@ -487,6 +487,58 @@ test_config_is_honoured() {
     drop_sandbox
 }
 
+# A stub whose "outdated" list is long enough to be folded. Everything else
+# about it matches the generic stub: silent, exits 0.
+long_output_brew() {
+    cat > "$1/bin/brew" <<'EOF'
+#!/bin/sh
+if [ "$1" = "outdated" ]; then
+    i=1
+    while [ "$i" -le 100 ]; do echo "package-$i 1.0 -> 2.0"; i=$((i + 1)); done
+fi
+exit 0
+EOF
+    chmod +x "$1/bin/brew"
+}
+
+test_long_preview_is_folded() {
+    describe "output: a long pending list is folded, not dumped" || return 0
+    local home out
+    home="$(new_sandbox brew)"; mkdir -p "$home/tmp"
+    long_output_brew "$home"
+
+    out="$(run_in "$home" --check --yes 2>&1)"
+    assert_contains "$out" "package-1 " "the start of the list is shown"
+    assert_contains "$out" "and 80 more" "the rest is folded into a count"
+    assert_absent_from "$out" "package-100 " "the tail never reaches the terminal"
+    drop_sandbox
+}
+
+test_full_flag_restores_the_list() {
+    describe "output: --full prints every line" || return 0
+    local home out
+    home="$(new_sandbox brew)"; mkdir -p "$home/tmp"
+    long_output_brew "$home"
+
+    out="$(run_in "$home" --check --yes --full 2>&1)"
+    assert_contains "$out" "package-100 " "the whole list is printed"
+    assert_absent_from "$out" "more (full list in the log" "nothing is folded away"
+    drop_sandbox
+}
+
+test_folded_list_is_complete_in_the_log() {
+    describe "output: folding never loses a line from the log" || return 0
+    local home log
+    home="$(new_sandbox brew)"; mkdir -p "$home/tmp"
+    long_output_brew "$home"
+
+    run_in "$home" --check --yes >/dev/null 2>&1
+    log="$(find "$home/.local/share/update-anything/logs" -name 'update-*.log' | head -1)"
+    assert_contains "$(cat "$log" 2>/dev/null)" "package-100 1.0 -> 2.0" \
+        "the line the terminal folded away is still on disk"
+    drop_sandbox
+}
+
 test_config_only_list_is_honoured() {
     describe "state: ONLY_LIST set in the config restricts the run" || return 0
     local home
@@ -564,6 +616,9 @@ main() {
     test_log_written
     test_snapshot_before_changes
     test_config_is_honoured
+    test_long_preview_is_folded
+    test_full_flag_restores_the_list
+    test_folded_list_is_complete_in_the_log
     test_config_only_list_is_honoured
     test_config_quiet_is_honoured
     test_bash32_compatible

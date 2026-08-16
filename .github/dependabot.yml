@@ -1,0 +1,11 @@
+version: 2
+updates:
+  # The script itself has no dependencies to bump — the point of a single bash
+  # file. The workflow's actions do, and a pinned action that nobody revisits is
+  # how a supply-chain advisory goes unnoticed for a year.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"

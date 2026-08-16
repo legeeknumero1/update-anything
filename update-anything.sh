@@ -65,6 +65,10 @@ readonly MIN_FREE_MB_WARN=2048
 readonly MIN_FREE_MB_ABORT=500
 readonly LOG_RETENTION_DAYS=30
 
+# How many pending-update lines reach the terminal before the rest is folded
+# into a count. The log always gets every line; --full disables the folding.
+readonly PREVIEW_MAX_LINES=20
+
 # --- Options ------------------------------------------------------------------
 
 ASSUME_YES=0
@@ -79,6 +83,7 @@ DO_INHIBIT_SLEEP=0
 DO_AUDIT=0
 QUIET=0
 NO_PARALLEL=0
+SHOW_FULL=0
 SKIP_LIST=" "
 ONLY_LIST=""
 
@@ -442,6 +447,36 @@ check_pacman_lock() {
   exit 1
 }
 
+# A pending-update list, shown in full to the log and abridged to the terminal.
+#
+# A routine `pacman -Syu` on a machine that tracks a Haskell-heavy repo produces
+# 250 lines of version bumps. Printing all of them pushes every pre-flight
+# result, every other manager and the summary off the top of the scrollback, so
+# the one part worth reading -- what failed -- is the part that scrolls away.
+# The full list is never lost: it is in the log either way, and --full puts it
+# back on the terminal.
+preview_list() {
+  local label="$1" body="$2" total shown
+  [[ -z "$body" ]] && return 0
+  total=$(printf '%s\n' "$body" | wc -l | tr -d ' ')
+
+  # Written in one block rather than one log() call per line: a 250-package
+  # list would otherwise mean 250 date(1) invocations.
+  {
+    printf '%s [LIST] %s (%s):\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$label" "$total"
+    printf '%s\n' "$body" | sed 's/^/    /'
+  } >>"$LOG_FILE"
+
+  if [[ "$SHOW_FULL" -eq 1 || "$total" -le "$PREVIEW_MAX_LINES" ]]; then
+    printf '%s\n' "$body"
+    return 0
+  fi
+
+  shown=$((total - PREVIEW_MAX_LINES))
+  printf '%s\n' "$body" | head -n "$PREVIEW_MAX_LINES"
+  echo "${C_BLUE}...and ${shown} more (full list in the log, or run with --full)${C_RESET}"
+}
+
 SUDO_KEEPALIVE_PID=""
 warm_sudo() {
   command -v sudo >/dev/null 2>&1 || return 0
@@ -555,7 +590,7 @@ step_pacman() {
       success "System is up to date (official repos)."
       official_up_to_date=1
     else
-      echo "$pending"
+      preview_list "pacman: official-repo updates" "$pending"
     fi
   else
     warn "checkupdates not found (install 'pacman-contrib' for a pre-upgrade preview)."
@@ -592,7 +627,7 @@ step_pacman() {
   paru) aur_pending=$(paru -Qua 2>/dev/null || true) ;;
   esac
   if [[ -n "$aur_pending" ]]; then
-    echo "$aur_pending"
+    preview_list "AUR updates ($helper)" "$aur_pending"
   elif [[ "$helper" == "yay" || "$helper" == "paru" ]]; then
     success "AUR is up to date."
     return 0
@@ -618,7 +653,7 @@ step_apt() {
     success "System is up to date (apt)."
     return 0
   fi
-  echo "$pending"
+  preview_list "apt: upgradable packages" "$pending"
   [[ "$CHECK_ONLY" -eq 1 ]] && return 0
   # full-upgrade (not plain upgrade): lets apt add/remove packages when
   # required to resolve dependencies, same rationale as pacman -Syu vs
@@ -691,14 +726,18 @@ step_apk() {
 
 step_brew() {
   info "Checking Homebrew/Linuxbrew updates..."
-  run_step "brew update" brew update
+  # --quiet suppresses the "New Formulae"/"New Casks" listing, which brew
+  # prints in full on every single update -- forty-odd lines about packages
+  # nobody asked about, ahead of the handful that are actually outdated. It
+  # affects nothing but that listing; brew still reports what it upgrades.
+  run_step "brew update" brew update --quiet
   local outdated
   outdated=$(brew outdated 2>/dev/null || true)
   if [[ -z "$outdated" ]]; then
     success "Homebrew is up to date."
     return 0
   fi
-  echo "$outdated"
+  preview_list "outdated packages" "$outdated"
   [[ "$CHECK_ONLY" -eq 1 ]] && return 0
   confirm "Upgrade the Homebrew packages listed above?" || {
     warn "Skipped brew upgrade by user choice."
@@ -716,7 +755,7 @@ step_macports() {
     success "MacPorts is up to date."
     return 0
   fi
-  echo "$outdated"
+  preview_list "outdated packages" "$outdated"
   [[ "$CHECK_ONLY" -eq 1 ]] && return 0
   confirm "Upgrade outdated MacPorts packages?" || {
     warn "Skipped MacPorts upgrade by user choice."
@@ -1217,6 +1256,10 @@ Options:
                      concurrently by default, since none of them need root
                      or share state; use this if you want readable live
                      output instead.
+  --full            Print every pending update. By default the terminal gets
+                     the first 20 lines and a count of the rest, so a
+                     250-package upgrade does not push the summary out of
+                     the scrollback. The log always holds the full list.
   -h, --help        Show this help.
   -v, --version     Show version and exit.
 
@@ -1288,6 +1331,7 @@ while [[ $# -gt 0 ]]; do
   --notify) DO_NOTIFY=1 ;;
   -q | --quiet) QUIET=1 ;;
   --no-parallel) NO_PARALLEL=1 ;;
+  --full) SHOW_FULL=1 ;;
   --only)
     [[ -n "${2:-}" ]] || {
       error "--only needs a manager name, e.g. --only flatpak"

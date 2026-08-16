@@ -7,7 +7,7 @@ _update_anything() {
     COMPREPLY=()
     cur="${COMP_WORDS[COMP_CWORD]}"
     opts="-y --yes -c --check --clean --orphans --firmware --snapshot --deep-clean \
---inhibit-sleep --audit --rollback --notify --only -q --quiet --no-parallel \
+--inhibit-sleep --audit --rollback --notify --only -q --quiet --no-parallel --full \
 -h --help -v --version \
 --no-pacman --no-apt --no-dnf --no-yum --no-zypper --no-apk --no-brew \
 --no-macports --no-pkg --no-pkg_add --no-flatpak --no-snap --no-nix \
