@@ -1,7 +1,7 @@
 # Fish completion for update-anything.
 # Install location (auto-detected by install.sh): ~/.config/fish/completions/update-anything.fish
 
-complete -c update-anything -s y -l yes -d 'Skip confirmation prompts'
+complete -c update-anything -s y -l yes -d 'Fully unattended: answers every prompt, including the package managers\' own'
 complete -c update-anything -s c -l check -d 'Dry run, change nothing'
 complete -c update-anything -l clean -d 'Clean package cache'
 complete -c update-anything -l orphans -d 'Remove orphaned packages'

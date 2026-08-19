@@ -5,7 +5,7 @@
 **One command that updates every package manager you actually have — on any Unix, without assuming which ones those are.**
 
 [![CI](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml/badge.svg)](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-54%20passing-brightgreen)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-64%20passing-brightgreen)](tests/run.sh)
 [![ShellCheck](https://img.shields.io/badge/shellcheck-strict-brightgreen)](https://www.shellcheck.net/)
 [![Bash 3.2](https://img.shields.io/badge/bash-3.2%20compatible-blue)](#portability)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
@@ -223,7 +223,7 @@ simply not checked.
 ## Tests
 
 ```sh
-./tests/run.sh              # 54 cases
+./tests/run.sh              # 40 cases, 64 assertions
 ./tests/run.sh safety       # only cases whose name matches
 ```
 

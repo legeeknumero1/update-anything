@@ -8,8 +8,10 @@
 #
 # cp config.example ~/.config/update-anything/config
 
-# Skip this script's own confirmation prompts (package managers' own
-# destructive prompts still stay interactive -- see README's threat model).
+# Fully unattended: answers this script's prompts and passes every package
+# manager its own non-interactive flag, so nothing stops for input. That
+# includes package removals and unreviewed AUR PKGBUILD changes -- only set
+# it if you trust every configured source. See the README's threat model.
 # ASSUME_YES=1
 
 # Also clean the package cache / remove orphaned packages every run.
