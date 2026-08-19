@@ -3,13 +3,34 @@
 Notable changes, newest first. Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.1] — 2026-08-19
+## [1.2.0] — 2026-08-19
 
-Everything here came out of the first real (non-`--check`) run on a live
-machine. `--check` never requests sudo, so the test suite had never once
-exercised that path — and it accounts for most of what follows.
+### Changed
+
+- **`-y` is now unattended in the real sense.** It previously answered this
+  script's prompts and stopped there, on the principle that a package
+  manager's own destructive prompt is the last line of defence. In practice
+  that made `-y` useless for the case it exists for: `pacman -Syu` still asked
+  "Proceed with installation?", and `yay -Sua` asked four separate questions
+  including which `PKGBUILD` diffs to show. A run advertised as a cron entry
+  cannot stop and wait for a person.
+
+  `-y` now passes each manager its own non-interactive flag — `--noconfirm`
+  for pacman and the AUR helpers (`--no-confirm` for `pamac`), `-y` for apt,
+  dnf, yum, FreeBSD `pkg` and `fwupdmgr`, `--non-interactive` for zypper, `-N`
+  for MacPorts, `-I` for `pkg_add`. Orphan removal and firmware flashing are
+  covered too, since both prompt.
+
+  This is a real transfer of judgement from you to the tool, so every `-y` run
+  now opens by saying what it is accepting on your behalf, and both `--help`
+  and the README say it plainly. Interactive mode is unchanged: without `-y`,
+  no manager is ever handed a non-interactive flag.
 
 ### Fixed
+
+Everything below came out of the first real (non-`--check`) run on a live
+machine. `--check` never requests sudo, so the test suite had never once
+exercised that path — and it accounts for most of what follows.
 
 - **The parallel block waited on the sudo keepalive.** `wait` with no
   arguments waits for *every* background job of the shell, and `warm_sudo`
@@ -57,7 +78,7 @@ exercised that path — and it accounts for most of what follows.
 ### Testing
 
 The suite now covers a real `--yes` run rather than only `--check`, which is
-what makes the sudo path reachable at all. Eight new cases, and one fix to
+what makes the sudo path reachable at all. Eleven new cases, and one fix to
 the harness itself: sandbox utilities were resolved with `command -v`, which
 answers with the builtin's name for `true`, `printf` and `kill` — the symlink
 dangled, so the stub `sudo -n true` failed, the keepalive died on its first
@@ -157,7 +178,7 @@ Initial release: OS and package manager auto-detection, per-manager skip flags,
 `--check`, package snapshots, opt-in cleanup and firmware steps, shell
 completions for bash, zsh and fish, and an installer.
 
-[1.1.1]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.1.1
+[1.2.0]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.2.0
 [1.1.0]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.1.0
 [1.0.1]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.0.1
 [1.0.0]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.0.0

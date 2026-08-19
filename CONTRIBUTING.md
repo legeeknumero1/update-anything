@@ -60,7 +60,7 @@ someone "simplifying" it back.
 
 ## Adding a package manager
 
-The most common change, and it touches four places. Take `flatpak` as the
+The most common change, and it touches five places. Take `flatpak` as the
 worked example.
 
 **1. Detection.** One line in `detect_managers()`, and it must be a probe, never
@@ -94,11 +94,26 @@ Registration order matters and is not obvious: a manager that needs `sudo` has
 to be registered **before** `brew`, which drops the sudo ticket on every
 invocation — see [ADR 0004](docs/adr/0004-one-sudo-ticket-owned-by-the-run-order.md).
 
-**3. Completions.** All three: `completions/update-anything.bash`,
+**3. Its non-interactive flag.** If the manager asks anything of its own, `-y`
+has to be able to silence it, or an unattended run stops dead at a prompt
+nobody is there to answer. Every manager spells it differently, so the command
+is built as an array and the flag appended only under `--yes`:
+
+```bash
+local -a cmd=(flatpak update)
+[[ "$ASSUME_YES" -eq 1 ]] && cmd+=(-y)
+run_step "flatpak update" "${cmd[@]}"
+```
+
+Managers that never prompt need nothing here. See
+[ADR 0005](docs/adr/0005-yes-is-unattended-or-it-is-nothing.md) for why `--yes`
+carries this at all.
+
+**4. Completions.** All three: `completions/update-anything.bash`,
 `completions/_update-anything`, `completions/update-anything.fish`. `--no-<name>`
 is generic in the parser, but it still has to be listed to be completable.
 
-**4. A test.** At minimum that `--check` does not mutate and that `--no-<name>`
+**5. A test.** At minimum that `--check` does not mutate and that `--no-<name>`
 suppresses it entirely. `new_sandbox flatpak` gives you a stub that records how
 it was called:
 

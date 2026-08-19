@@ -68,7 +68,7 @@ cd packaging/aur && makepkg -si
 ```sh
 update-anything --check              # dry run, changes nothing
 update-anything                      # interactive: previews, then asks
-update-anything -y                   # skip this script's own prompts
+update-anything -y                   # fully unattended (read the warning below)
 update-anything --only flatpak,cargo # just these two, ignore the rest
 update-anything --no-snap --no-brew  # everything except these
 update-anything -y --quiet           # what a cron entry looks like
@@ -77,6 +77,20 @@ update-anything --rollback           # diff the last two package snapshots
 ```
 
 `update-anything --help` lists every flag.
+
+### What `-y` actually means
+
+`-y` is unattended in the real sense: it answers this script's prompts *and*
+passes each package manager its own non-interactive flag (`--noconfirm`, `-y`,
+`--non-interactive`, `-N`, depending on the manager). Nothing stops for input.
+
+That includes things worth stopping for — a package being removed to resolve a
+conflict, a replacement of one package by another, an AUR `PKGBUILD` that
+changed since you last read it. Use `-y` only where you trust every configured
+source, including your AUR helper's. When you are not sure, run without it and
+read each prompt; that is what the interactive mode is for.
+
+Every `-y` run says so on screen before touching anything.
 
 ### Exit status
 
@@ -97,7 +111,7 @@ unattended on your machine earns its trust by what it declines to do.
 | Risk | Mitigation |
 |---|---|
 | Partial upgrade corrupts the system (Arch-class distros explicitly warn against this) | Always a full `-Syu`/`full-upgrade`/`upgrade`, never a scoped package list |
-| The script silently answers "yes" to a package manager's own destructive prompt (replace/remove/conflict) | `--yes` skips *this script's* confirmations only. `--noconfirm`/`-y` is never passed to pacman, apt, dnf, zypper, apk, yay or paru |
+| The script silently answers "yes" to a package manager's own destructive prompt (replace/remove/conflict) | Never without `--yes`. `--yes` is explicitly the unattended mode and does pass `--noconfirm`/`-y`/`--non-interactive`; it prints what it is waiving at the top of every run |
 | Two instances race on the package database | `mkdir`-based atomic lock — portable, no `flock` dependency |
 | Disk fills mid-transaction | Aborts before starting if free space on `/` is critically low |
 | Running as root breaks AUR helpers and Homebrew, or masks `sudo`-scoped intent | Refuses to start as root; calls `sudo` itself, only where a manager needs it |
@@ -242,6 +256,7 @@ and why:
 - [Report package holds, never reimplement them](docs/adr/0002-report-holds-never-reimplement-them.md) — why this tool owns no hold state of its own
 - [Parallelism limited to user-space managers](docs/adr/0003-parallelism-limited-to-user-space-managers.md) — why system managers stay in a line
 - [One sudo ticket, protected by the run order](docs/adr/0004-one-sudo-ticket-owned-by-the-run-order.md) — why Homebrew decides where every other manager runs
+- [`--yes` is unattended, or it is nothing](docs/adr/0005-yes-is-unattended-or-it-is-nothing.md) — why the strongest safety claim was given up, and what replaced it
 
 ## Contributing
 

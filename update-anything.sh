@@ -47,7 +47,7 @@ set -uo pipefail
 # --- Constants --------------------------------------------------------------
 
 readonly SCRIPT_NAME="update-anything"
-readonly VERSION="1.1.1"
+readonly VERSION="1.2.0"
 readonly STATE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/${SCRIPT_NAME}"
 readonly LOG_DIR="${STATE_DIR}/logs"
 readonly SNAPSHOT_DIR="${STATE_DIR}/pkg-snapshots"
@@ -477,6 +477,19 @@ preview_list() {
   echo "${C_BLUE}...and ${shown} more (full list in the log, or run with --full)${C_RESET}"
 }
 
+# --yes now answers the package managers' prompts too, which is the only way
+# an unattended run finishes without a terminal. That is a real transfer of
+# judgement from the user to the tool, so it is stated at the top of every
+# such run rather than left in the manual. Not a prompt: a run started with
+# --yes must never stop for anything.
+announce_unattended() {
+  warn "--yes: every question is answered for you, this script's and your"
+  warn "package manager's. Package removals and replacements, and unreviewed"
+  warn "AUR PKGBUILD changes, are all accepted without showing you a diff."
+  warn "Use it only where you trust every configured source. If you are not"
+  warn "certain, stop now and run '$SCRIPT_NAME' without --yes."
+}
+
 SUDO_KEEPALIVE_PID=""
 warm_sudo() {
   command -v sudo >/dev/null 2>&1 || return 0
@@ -614,7 +627,9 @@ step_pacman() {
       local prompt="Sync and upgrade official-repo packages with 'sudo pacman -Syu'?"
       [[ "$have_preview" -eq 1 ]] && prompt="Apply the $(wc -l <<<"$pending") pacman update(s) above with 'sudo pacman -Syu'?"
       if confirm "$prompt"; then
-        run_step "pacman -Syu" sudo pacman -Syu
+        local -a cmd=(sudo pacman -Syu)
+        [[ "$ASSUME_YES" -eq 1 ]] && cmd+=(--noconfirm)
+        run_step "pacman -Syu" "${cmd[@]}"
       else
         warn "Skipped pacman upgrade by user choice."
       fi
@@ -650,10 +665,19 @@ step_pacman() {
     warn "Skipped AUR upgrade by user choice."
     return 0
   }
+  local -a cmd=("$helper")
   case "$helper" in
-  yay | paru) run_step "AUR ($helper)" "$helper" -Sua ;;
-  *) run_step "AUR ($helper)" "$helper" -Syu ;;
+  yay | paru) cmd+=(-Sua) ;;
+  *) cmd+=(-Syu) ;;
   esac
+  if [[ "$ASSUME_YES" -eq 1 ]]; then
+    # pamac is the one helper that hyphenates it.
+    case "$helper" in
+    pamac) cmd+=(--no-confirm) ;;
+    *) cmd+=(--noconfirm) ;;
+    esac
+  fi
+  run_step "AUR ($helper)" "${cmd[@]}"
 }
 
 step_apt() {
@@ -669,13 +693,14 @@ step_apt() {
   [[ "$CHECK_ONLY" -eq 1 ]] && return 0
   # full-upgrade (not plain upgrade): lets apt add/remove packages when
   # required to resolve dependencies, same rationale as pacman -Syu vs
-  # partial upgrades. --noconfirm is never passed: apt's own removal/
-  # conflict prompts stay interactive.
+  # partial upgrades.
   confirm "Apply the apt update(s) above with 'sudo apt-get full-upgrade'?" || {
     warn "Skipped apt upgrade by user choice."
     return 0
   }
-  run_step "apt-get full-upgrade" sudo apt-get full-upgrade
+  local -a cmd=(sudo apt-get full-upgrade)
+  [[ "$ASSUME_YES" -eq 1 ]] && cmd+=(-y)
+  run_step "apt-get full-upgrade" "${cmd[@]}"
 }
 
 step_dnf() {
@@ -688,7 +713,9 @@ step_dnf() {
     warn "Skipped dnf upgrade by user choice."
     return 0
   }
-  run_step "dnf upgrade" sudo dnf upgrade
+  local -a cmd=(sudo dnf upgrade)
+  [[ "$ASSUME_YES" -eq 1 ]] && cmd+=(-y)
+  run_step "dnf upgrade" "${cmd[@]}"
 }
 
 step_yum() {
@@ -702,7 +729,9 @@ step_yum() {
     warn "Skipped yum upgrade by user choice."
     return 0
   }
-  run_step "yum update" sudo yum update
+  local -a cmd=(sudo yum update)
+  [[ "$ASSUME_YES" -eq 1 ]] && cmd+=(-y)
+  run_step "yum update" "${cmd[@]}"
 }
 
 step_zypper() {
@@ -719,7 +748,10 @@ step_zypper() {
     warn "Skipped zypper upgrade by user choice."
     return 0
   }
-  run_step "zypper update" sudo zypper update
+  local -a cmd=(sudo zypper)
+  [[ "$ASSUME_YES" -eq 1 ]] && cmd+=(--non-interactive)
+  cmd+=(update)
+  run_step "zypper update" "${cmd[@]}"
 }
 
 step_apk() {
@@ -773,7 +805,10 @@ step_macports() {
     warn "Skipped MacPorts upgrade by user choice."
     return 0
   }
-  run_step "port upgrade outdated" sudo port upgrade outdated
+  local -a cmd=(sudo port)
+  [[ "$ASSUME_YES" -eq 1 ]] && cmd+=(-N)
+  cmd+=(upgrade outdated)
+  run_step "port upgrade outdated" "${cmd[@]}"
 }
 
 step_pkg() {
@@ -787,7 +822,9 @@ step_pkg() {
     warn "Skipped pkg upgrade by user choice."
     return 0
   }
-  run_step "pkg upgrade" sudo pkg upgrade
+  local -a cmd=(sudo pkg upgrade)
+  [[ "$ASSUME_YES" -eq 1 ]] && cmd+=(-y)
+  run_step "pkg upgrade" "${cmd[@]}"
 }
 
 step_pkg_add() {
@@ -800,11 +837,10 @@ step_pkg_add() {
     warn "Skipped pkg_add upgrade by user choice."
     return 0
   }
-  if command -v doas >/dev/null 2>&1; then
-    run_step "pkg_add -u" doas pkg_add -u
-  else
-    run_step "pkg_add -u" sudo pkg_add -u
-  fi
+  local -a cmd=(sudo pkg_add -u)
+  command -v doas >/dev/null 2>&1 && cmd=(doas pkg_add -u)
+  [[ "$ASSUME_YES" -eq 1 ]] && cmd+=(-I)
+  run_step "pkg_add -u" "${cmd[@]}"
 }
 
 # --- Universal (cross-distro) managers, identical logic on every OS -----------
@@ -1215,15 +1251,21 @@ step_orphans() {
       return 0
     }
     echo "$orphans"
+    local noconfirm=""
+    [[ "$ASSUME_YES" -eq 1 ]] && noconfirm="--noconfirm"
     # $orphans is a newline-separated package list and must word-split into
     # separate arguments; quoting it would hand pacman one argument containing
-    # every package name.
+    # every package name. $noconfirm is empty unless --yes was given.
     # shellcheck disable=SC2086
-    confirm "Remove the orphaned packages listed above ('sudo pacman -Rns')?" && run_step "Remove orphans" sudo pacman -Rns $orphans
+    confirm "Remove the orphaned packages listed above ('sudo pacman -Rns')?" && run_step "Remove orphans" sudo pacman -Rns $noconfirm $orphans
   elif command -v apt-get >/dev/null 2>&1; then
-    confirm "Remove unused packages ('sudo apt-get autoremove')?" && run_step "apt-get autoremove" sudo apt-get autoremove
+    local -a cmd=(sudo apt-get autoremove)
+    [[ "$ASSUME_YES" -eq 1 ]] && cmd+=(-y)
+    confirm "Remove unused packages ('sudo apt-get autoremove')?" && run_step "apt-get autoremove" "${cmd[@]}"
   elif command -v dnf >/dev/null 2>&1; then
-    confirm "Remove unused packages ('sudo dnf autoremove')?" && run_step "dnf autoremove" sudo dnf autoremove
+    local -a cmd=(sudo dnf autoremove)
+    [[ "$ASSUME_YES" -eq 1 ]] && cmd+=(-y)
+    confirm "Remove unused packages ('sudo dnf autoremove')?" && run_step "dnf autoremove" "${cmd[@]}"
   else
     warn "--orphans requested but no supported orphan-cleaner found for this system."
   fi
@@ -1247,7 +1289,9 @@ step_firmware() {
     warn "Skipped firmware update by user choice."
     return 0
   }
-  run_step "fwupdmgr update" fwupdmgr update
+  local -a cmd=(fwupdmgr update)
+  [[ "$ASSUME_YES" -eq 1 ]] && cmd+=(--assume-yes)
+  run_step "fwupdmgr update" "${cmd[@]}"
 }
 
 # --- CLI ------------------------------------------------------------------------
@@ -1266,9 +1310,11 @@ installed is silently skipped -- none of this is assumed present ahead of
 time.
 
 Options:
-  -y, --yes         Skip this script's own confirmation prompts (package
-                     managers' OWN destructive prompts are never
-                     auto-answered).
+  -y, --yes         Fully unattended: answers this script's prompts AND
+                     passes each package manager its own non-interactive
+                     flag (--noconfirm, -y, --non-interactive...). Nothing
+                     stops for input, including package removals and AUR
+                     PKGBUILD review. Only for sources you fully trust.
   -c, --check       Dry run: only show what is pending, change nothing.
   --clean           Also clean the package cache, with confirmation.
   --orphans         Also remove orphaned packages, with confirmation.
@@ -1344,8 +1390,9 @@ Webhook:
 Safety notes:
   - Never run as root; sudo is invoked internally only where needed.
   - Never partial-upgrades a system package manager.
-  - Never passes --noconfirm/-y to the underlying package manager: its own
-    prompts about replacing/removing packages always stay interactive.
+  - Without --yes, the package manager's own prompts about replacing or
+    removing packages stay interactive and are yours to answer. --yes
+    waives that, deliberately and loudly (see -y above).
   - Aborts before touching anything if offline, disk is nearly full, battery
     is below 10% and discharging, or a pacman lock file suggests another
     instance is already running.
@@ -1428,6 +1475,8 @@ fi
 detect_os
 require_not_root
 acquire_lock
+
+[[ "$ASSUME_YES" -eq 1 && "$CHECK_ONLY" -eq 0 ]] && announce_unattended
 
 section "Pre-flight checks"
 check_internet

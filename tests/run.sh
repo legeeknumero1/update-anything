@@ -539,6 +539,63 @@ test_brew_runs_after_managers_that_need_sudo() {
     drop_sandbox
 }
 
+# A yay that reports one pending AUR package, so the upgrade path is reached
+# at all: the generic stub answers `-Qua` with nothing, which reads as "AUR is
+# up to date" and returns before any command worth asserting on.
+stub_yay_with_pending() {
+    cat > "$1/bin/yay" <<EOF
+#!/bin/sh
+echo "yay \$*" >> "$1/calls.log"
+[ "\$1" = "-Qua" ] && echo "somepkg 1.0-1 -> 1.1-1"
+exit 0
+EOF
+    chmod +x "$1/bin/yay"
+}
+
+test_yes_is_fully_unattended() {
+    describe "--yes: managers are given their own non-interactive flag" || return 0
+    local home calls
+    home="$(new_sandbox pacman yay)"; mkdir -p "$home/tmp"
+    stub_yay_with_pending "$home"
+
+    run_in "$home" --yes >/dev/null 2>&1
+    calls="$(calls_in "$home")"
+
+    # Without these, --yes answers this script and then stops dead on
+    # pacman's "Proceed with installation?" -- which is not unattended.
+    assert_contains "$calls" "pacman -Syu --noconfirm" "pacman is told not to ask"
+    assert_contains "$calls" "yay -Sua --noconfirm" "the AUR helper is told not to ask"
+    drop_sandbox
+}
+
+test_without_yes_managers_keep_their_prompts() {
+    describe "--yes: absent, the manager's own prompts are left alone" || return 0
+    local home calls
+    home="$(new_sandbox pacman yay)"; mkdir -p "$home/tmp"
+    stub_yay_with_pending "$home"
+
+    calls="$(printf 'y\ny\ny\ny\ny\n' | run_in "$home" >/dev/null 2>&1; calls_in "$home")"
+
+    assert_contains "$calls" "pacman -Syu" "the upgrade still runs"
+    assert_absent_from "$calls" "--noconfirm" "nothing was auto-answered on the user's behalf"
+    drop_sandbox
+}
+
+test_yes_announces_what_it_waives() {
+    describe "--yes: the run says what it is accepting for you" || return 0
+    local home out
+    home="$(new_sandbox pacman)"; mkdir -p "$home/tmp"
+
+    out="$(run_in "$home" --yes 2>&1)"
+    assert_contains "$out" "every question is answered for you" \
+        "the warning is on screen before anything is touched"
+
+    out="$(run_in "$home" --check 2>&1)"
+    assert_absent_from "$out" "every question is answered for you" \
+        "a dry run is not warned about"
+    drop_sandbox
+}
+
 test_log_written() {
     describe "state: a log is written for every run" || return 0
     local home
@@ -779,6 +836,9 @@ main() {
     test_no_warning_when_sudo_caches
     test_credentials_are_taken_after_brew_has_run
     test_brew_runs_after_managers_that_need_sudo
+    test_yes_is_fully_unattended
+    test_without_yes_managers_keep_their_prompts
+    test_yes_announces_what_it_waives
     test_log_written
     test_snapshot_before_changes
     test_config_is_honoured
