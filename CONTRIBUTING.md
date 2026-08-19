@@ -90,6 +90,10 @@ step_flatpak() {
 Long pending lists go through `preview_list` rather than a bare `echo`, so the
 terminal stays readable and the log stays complete.
 
+Registration order matters and is not obvious: a manager that needs `sudo` has
+to be registered **before** `brew`, which drops the sudo ticket on every
+invocation — see [ADR 0004](docs/adr/0004-one-sudo-ticket-owned-by-the-run-order.md).
+
 **3. Completions.** All three: `completions/update-anything.bash`,
 `completions/_update-anything`, `completions/update-anything.fish`. `--no-<name>`
 is generic in the parser, but it still has to be listed to be completable.

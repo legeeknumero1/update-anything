@@ -105,6 +105,7 @@ EOF
     # sudo must not actually elevate during tests: it simply runs what follows.
     cat > "$SANDBOX/bin/sudo" <<EOF
 #!/bin/sh
+echo "sudo \$*" >> "$SANDBOX/calls.log"
 [ "\$1" = "-v" ] && exit 0
 [ "\$1" = "-n" ] && shift
 exec "\$@"
@@ -156,6 +157,11 @@ run_in() {
 }
 
 calls_in() { cat "$1/calls.log" 2>/dev/null; }
+
+# Position of a call in the single ordered timeline of calls.log. Ordering is
+# the whole assertion for the sudo-ticket tests: what matters is not that brew
+# ran, but that it ran on the correct side of `sudo -v`.
+call_line() { grep -n -m1 -F "$2" "$1/calls.log" 2>/dev/null | cut -d: -f1; }
 
 describe() {
     if [ -n "$FILTER" ]; then
@@ -461,6 +467,78 @@ test_no_parallel_is_not_a_manager() {
 
 # --- State ------------------------------------------------------------------
 
+test_warns_when_sudo_does_not_cache() {
+    describe "sudo: a system that does not cache credentials is announced" || return 0
+    local home out
+    home="$(new_sandbox cargo)"; mkdir -p "$home/tmp"
+
+    # `sudo -v` succeeding says nothing about whether the ticket was kept:
+    # with timestamp_timeout=0 sudo authenticates and stores nothing. This
+    # stub is that system. Before the probe, the tool claimed to take
+    # credentials "upfront" and then prompted at every privileged step.
+    cat > "$home/bin/sudo" <<EOF
+#!/bin/sh
+[ "\$1" = "-v" ] && exit 0
+[ "\$1" = "-n" ] && exit 1
+exec "\$@"
+EOF
+    chmod +x "$home/bin/sudo"
+
+    out="$(run_in "$home" --yes 2>&1)"
+    assert_contains "$out" "not caching credentials" \
+        "the run says so instead of promising a single prompt"
+    drop_sandbox
+}
+
+test_no_warning_when_sudo_caches() {
+    describe "sudo: a caching system is not warned about" || return 0
+    local home out
+    home="$(new_sandbox cargo)"; mkdir -p "$home/tmp"
+
+    out="$(run_in "$home" --yes 2>&1)"
+    assert_absent_from "$out" "not caching credentials" \
+        "the probe stays quiet when the ticket is kept"
+    drop_sandbox
+}
+
+test_credentials_are_taken_after_brew_has_run() {
+    describe "sudo: the ticket is taken after the last pre-flight brew call" || return 0
+    local home brew_at sudo_at
+    home="$(new_sandbox pacman brew checkupdates)"; mkdir -p "$home/tmp"
+
+    run_in "$home" --yes >/dev/null 2>&1
+    brew_at="$(call_line "$home" "brew list --versions")"
+    sudo_at="$(call_line "$home" "sudo -v")"
+
+    # Every Homebrew invocation execs `sudo --reset-timestamp` first. The
+    # package snapshot calls `brew list --versions`, so taking credentials
+    # before it meant they were gone one command later and pacman asked for
+    # the password a second time.
+    if [ -n "$brew_at" ] && [ -n "$sudo_at" ] && [ "$brew_at" -lt "$sudo_at" ]; then
+        pass "the snapshot's brew call comes before sudo -v"
+    else
+        fail "brew at line ${brew_at:-none}, sudo -v at line ${sudo_at:-none}"
+    fi
+    drop_sandbox
+}
+
+test_brew_runs_after_managers_that_need_sudo() {
+    describe "sudo: brew is ordered after every manager that needs the ticket" || return 0
+    local home snap_at brew_at
+    home="$(new_sandbox brew snap)"; mkdir -p "$home/tmp"
+
+    run_in "$home" --yes >/dev/null 2>&1
+    snap_at="$(call_line "$home" "sudo snap refresh")"
+    brew_at="$(call_line "$home" "brew update")"
+
+    if [ -n "$snap_at" ] && [ -n "$brew_at" ] && [ "$snap_at" -lt "$brew_at" ]; then
+        pass "snap refresh runs while the ticket is still valid"
+    else
+        fail "snap at line ${snap_at:-none}, brew update at line ${brew_at:-none}"
+    fi
+    drop_sandbox
+}
+
 test_log_written() {
     describe "state: a log is written for every run" || return 0
     local home
@@ -697,6 +775,10 @@ main() {
     test_no_parallel_when_a_prompt_is_possible
     test_parallel_output_is_logged_once
     test_timings_reach_the_log_even_when_quiet
+    test_warns_when_sudo_does_not_cache
+    test_no_warning_when_sudo_caches
+    test_credentials_are_taken_after_brew_has_run
+    test_brew_runs_after_managers_that_need_sudo
     test_log_written
     test_snapshot_before_changes
     test_config_is_honoured

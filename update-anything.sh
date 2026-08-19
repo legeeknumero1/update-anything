@@ -485,6 +485,18 @@ warm_sudo() {
     error "Could not obtain sudo credentials."
     exit 1
   fi
+
+  # A successful 'sudo -v' does not mean the credentials were kept. With
+  # timestamp_timeout=0 in sudoers, or a policy plugin that declines to cache,
+  # sudo authenticates and stores nothing -- so every privileged step prompts
+  # again and the keepalive below has nothing to keep alive. Asking sudo
+  # directly is the only reliable way to tell the two apart, and it costs one
+  # non-interactive call.
+  if ! sudo -n true 2>/dev/null; then
+    warn "sudo is not caching credentials on this system (timestamp_timeout=0"
+    warn "or equivalent policy): each privileged step will ask again."
+    return 0
+  fi
   # Sleeps in one-second steps rather than one 60-second step. Killing the
   # subshell does not kill a sleep already running inside it, so a single long
   # sleep was left orphaned and outlived the script by up to a minute; and the
@@ -908,7 +920,6 @@ register_managers() {
   command -v yum >/dev/null 2>&1 && MANAGERS+=("yum")
   command -v zypper >/dev/null 2>&1 && MANAGERS+=("zypper")
   command -v apk >/dev/null 2>&1 && MANAGERS+=("apk")
-  command -v brew >/dev/null 2>&1 && MANAGERS+=("brew")
   command -v port >/dev/null 2>&1 && [[ "$OS_FAMILY" == "macos" ]] && MANAGERS+=("macports")
   command -v pkg >/dev/null 2>&1 && [[ "$OS_FAMILY" == "freebsd" ]] && MANAGERS+=("pkg")
   command -v pkg_add >/dev/null 2>&1 && [[ "$OS_FAMILY" == "openbsd" ]] && MANAGERS+=("pkg_add")
@@ -917,6 +928,12 @@ register_managers() {
   command -v flatpak >/dev/null 2>&1 && MANAGERS+=("flatpak")
   command -v snap >/dev/null 2>&1 && MANAGERS+=("snap")
   { command -v nix-channel >/dev/null 2>&1 || command -v home-manager >/dev/null 2>&1; } && MANAGERS+=("nix")
+
+  # brew is registered after every manager that needs sudo, and never before
+  # one: it drops the sudo ticket on each invocation, so `snap refresh` or
+  # `port upgrade` running after it would prompt again for no visible reason.
+  command -v brew >/dev/null 2>&1 && MANAGERS+=("brew")
+
   command -v cargo >/dev/null 2>&1 && MANAGERS+=("cargo")
   command -v npm >/dev/null 2>&1 && MANAGERS+=("npm")
   command -v pipx >/dev/null 2>&1 && MANAGERS+=("pipx")
@@ -1422,8 +1439,13 @@ register_managers
 info "Detected package managers: ${MANAGERS[*]:-none}"
 [[ -n "$ONLY_LIST" ]] && info "Restricted to:${ONLY_LIST}(--only)"
 report_holds
-[[ "$CHECK_ONLY" -eq 0 ]] && warm_sudo
+# Snapshot first, credentials second. The snapshot runs `brew list --versions`,
+# and every Homebrew invocation execs `sudo --reset-timestamp` before doing
+# anything else (Library/Homebrew/brew.sh) -- so a ticket taken before this
+# line is destroyed by the very next command, and the first privileged step
+# asks for the password a second time.
 snapshot_packages
+[[ "$CHECK_ONLY" -eq 0 ]] && warm_sudo
 
 if [[ "$CHECK_ONLY" -eq 0 ]]; then
   run_hooks pre-update

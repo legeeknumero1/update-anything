@@ -3,12 +3,11 @@
 Notable changes, newest first. Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.1] — 2026-08-16
+## [1.1.1] — 2026-08-19
 
 Everything here came out of the first real (non-`--check`) run on a live
 machine. `--check` never requests sudo, so the test suite had never once
-exercised the code path that starts a sudo keepalive — and three of these four
-bugs live there.
+exercised that path — and it accounts for most of what follows.
 
 ### Fixed
 
@@ -38,11 +37,27 @@ bugs live there.
 - **Step timings never reached the log**, and `--quiet` dropped them entirely.
   The cron case, the only one where nobody watches it happen, was the case
   that lost them.
+- **The password was asked for twice on any machine with Homebrew installed.**
+  `warm_sudo` took the ticket, and the very next thing the run did was
+  `brew list --versions` for the package snapshot. Every Homebrew invocation
+  execs `sudo --reset-timestamp` before doing anything else, so the ticket was
+  destroyed a fraction of a second after it was obtained, and the first
+  privileged step prompted again — with the keepalive dying on its next
+  iteration for the same reason. Two ordering changes fix it: the snapshot is
+  taken before credentials are requested, and `brew` is now registered after
+  every manager that needs the ticket rather than before `flatpak` and `snap`.
+- **A successful `sudo -v` was treated as proof the credentials were kept.**
+  It is not: with `timestamp_timeout=0` in sudoers, or a policy plugin that
+  declines to cache, sudo authenticates and stores nothing — leaving a
+  keepalive spinning for a minute with nothing to keep alive and no
+  explanation for the repeated prompts. `warm_sudo` now asks sudo directly,
+  with one non-interactive `sudo -n true`, and says so plainly when that is
+  the answer.
 
 ### Testing
 
 The suite now covers a real `--yes` run rather than only `--check`, which is
-what makes the keepalive path reachable at all. Four new cases, and one fix to
+what makes the sudo path reachable at all. Eight new cases, and one fix to
 the harness itself: sandbox utilities were resolved with `command -v`, which
 answers with the builtin's name for `true`, `printf` and `kill` — the symlink
 dangled, so the stub `sudo -n true` failed, the keepalive died on its first

@@ -241,6 +241,7 @@ and why:
 - [bash 3.2 as the baseline](docs/adr/0001-bash-3.2-as-the-baseline.md) — why not Python, Go, or a newer bash
 - [Report package holds, never reimplement them](docs/adr/0002-report-holds-never-reimplement-them.md) — why this tool owns no hold state of its own
 - [Parallelism limited to user-space managers](docs/adr/0003-parallelism-limited-to-user-space-managers.md) — why system managers stay in a line
+- [One sudo ticket, protected by the run order](docs/adr/0004-one-sudo-ticket-owned-by-the-run-order.md) — why Homebrew decides where every other manager runs
 
 ## Contributing
 
