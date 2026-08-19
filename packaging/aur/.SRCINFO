@@ -1,6 +1,6 @@
 pkgbase = update-anything
 	pkgdesc = Update every package manager actually installed, on any Unix, without assuming any of them are present
-	pkgver = 1.1.0
+	pkgver = 1.2.0
 	pkgrel = 1
 	url = https://github.com/legeeknumero1/update-anything
 	arch = any
@@ -16,7 +16,7 @@ pkgbase = update-anything
 	optdepends = snapper: --snapshot, a filesystem snapshot before updating
 	optdepends = timeshift: --snapshot, an alternative snapshot backend
 	optdepends = networkmanager: warn before downloading over a metered connection
-	source = update-anything-1.1.0.tar.gz::https://github.com/legeeknumero1/update-anything/archive/refs/tags/v1.1.0.tar.gz
-	sha256sums = 84789fa9bfe956e2417ef1233ec0618bc440f62a8113e6d8af38be0e0090b957
+	source = update-anything-1.2.0.tar.gz::https://github.com/legeeknumero1/update-anything/archive/refs/tags/v1.2.0.tar.gz
+	sha256sums = 67d68dd5d4e8cb38bc027620a637f08dd4fcfe513544a196d18a2d8c6fb3d7b8
 
 pkgname = update-anything
