@@ -3,6 +3,31 @@
 Notable changes, newest first. Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] — 2026-08-20
+
+### Fixed
+
+- **`--check` installed Rust toolchains.** `step_cargo` ran `rustup update`
+  before looking at `CHECK_ONLY` at all, so a dry run pulled down and
+  installed a new nightly and then reported "rustup update done" — 41 seconds
+  of a run that is documented to change nothing. `--check` now runs
+  `rustup check`, which answers the same question and writes nothing. The
+  suite never caught it because the one test asserting `--check` does not
+  mutate ran without a `rustup` stub on `PATH`.
+- **`port selfupdate` had the same shape on macOS**: it syncs the ports tree
+  *and* upgrades MacPorts base. `--check` now runs `port sync`, which does
+  only the first half. Reasoned rather than observed — the suite exercises
+  this path with stubs, not a real MacPorts install.
+- **`--version` and `--help` left a log file behind** containing nothing but
+  its own path, and printed `Full log: ...` pointing at it. Every invocation
+  added one more file to `~/.local/share/update-anything/logs/`. An empty log
+  is now removed and never announced.
+
+`--check` still refreshes package *indexes* where a manager cannot report
+what is pending without one — `apt-get update`, `brew update`, `zypper
+refresh`, `apk update`, `pkg update`. That is deliberate, and now said out
+loud in `--help` and in the threat model instead of being left to the reader.
+
 ## [1.2.0] — 2026-08-19
 
 ### Changed
@@ -178,6 +203,7 @@ Initial release: OS and package manager auto-detection, per-manager skip flags,
 `--check`, package snapshots, opt-in cleanup and firmware steps, shell
 completions for bash, zsh and fish, and an installer.
 
+[1.2.1]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.2.1
 [1.2.0]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.2.0
 [1.1.0]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.1.0
 [1.0.1]: https://github.com/legeeknumero1/update-anything/releases/tag/v1.0.1

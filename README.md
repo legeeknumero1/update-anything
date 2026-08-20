@@ -5,7 +5,7 @@
 **One command that updates every package manager you actually have — on any Unix, without assuming which ones those are.**
 
 [![CI](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml/badge.svg)](https://github.com/legeeknumero1/update-anything/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-64%20passing-brightgreen)](tests/run.sh)
+[![Tests](https://img.shields.io/badge/tests-69%20passing-brightgreen)](tests/run.sh)
 [![ShellCheck](https://img.shields.io/badge/shellcheck-strict-brightgreen)](https://www.shellcheck.net/)
 [![Bash 3.2](https://img.shields.io/badge/bash-3.2%20compatible-blue)](#portability)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
@@ -42,7 +42,7 @@ to do — see [Threat model](#threat-model).
 git clone https://github.com/legeeknumero1/update-anything
 cd update-anything
 ./install.sh
-update-anything --check      # dry run: queries everything, changes nothing
+update-anything --check      # dry run: queries everything, installs nothing
 ```
 
 There is deliberately no `curl | bash` one-liner. Piping a remote script
@@ -66,7 +66,7 @@ cd packaging/aur && makepkg -si
 ## Usage
 
 ```sh
-update-anything --check              # dry run, changes nothing
+update-anything --check              # dry run, installs nothing
 update-anything                      # interactive: previews, then asks
 update-anything -y                   # fully unattended (read the warning below)
 update-anything --only flatpak,cargo # just these two, ignore the rest
@@ -118,6 +118,7 @@ unattended on your machine earns its trust by what it declines to do.
 | Silent data loss from orphan removal or cache cleanup | Both opt-in (`--orphans`, `--clean`); both list what will go and ask first |
 | No way to know what changed when something breaks | A package snapshot and a timestamped log are written *before* anything is touched (`~/.local/share/update-anything/`, purged after 30 days) |
 | An offline run leaves package databases half-synced | Aborts before starting if the connectivity check fails |
+| `--check` quietly installs something | It installs nothing. Package *indexes* are still refreshed where a manager cannot report what is pending without one (`apt-get update`, `brew update`, `zypper refresh`, `apk update`, `pkg update`); pacman goes through `checkupdates`, which syncs a temporary database instead |
 | Power loss mid-transaction corrupts the package database | Aborts under 10% battery and discharging; warns under 20%. Skipped silently on desktops |
 | Hooks execute arbitrary code | Hooks run only from a directory under the invoking user's own `$HOME`, as that user, never elevated. Non-executable files are skipped with a warning rather than run |
 | A webhook exfiltrates data | Nothing is sent anywhere unless `UPDATE_ANYTHING_WEBHOOK_URL` is set by you; the payload is hostname plus pass/fail |
@@ -223,7 +224,7 @@ simply not checked.
 ## Tests
 
 ```sh
-./tests/run.sh              # 40 cases, 64 assertions
+./tests/run.sh              # 42 cases, 69 assertions
 ./tests/run.sh safety       # only cases whose name matches
 ```
 

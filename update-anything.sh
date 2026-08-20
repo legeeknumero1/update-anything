@@ -47,7 +47,7 @@ set -uo pipefail
 # --- Constants --------------------------------------------------------------
 
 readonly SCRIPT_NAME="update-anything"
-readonly VERSION="1.2.0"
+readonly VERSION="1.2.1"
 readonly STATE_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/${SCRIPT_NAME}"
 readonly LOG_DIR="${STATE_DIR}/logs"
 readonly SNAPSHOT_DIR="${STATE_DIR}/pkg-snapshots"
@@ -310,7 +310,14 @@ cleanup() {
     echo
     warn "Steps that failed or were skipped due to errors: ${FAILED_STEPS[*]}"
   fi
-  info "Full log: $LOG_FILE"
+  # --help, --version and an unknown flag exit before anything is logged.
+  # Announcing an empty file, and leaving it in ~/.local/share, made every
+  # `update-anything --version` litter the log directory.
+  if [[ -s "$LOG_FILE" ]]; then
+    info "Full log: $LOG_FILE"
+  else
+    rm -f "$LOG_FILE"
+  fi
   exit "$ec"
 }
 trap cleanup EXIT
@@ -792,7 +799,15 @@ step_brew() {
 
 step_macports() {
   info "Checking MacPorts updates..."
-  run_step "port selfupdate" sudo port selfupdate
+  # selfupdate syncs the ports tree *and* upgrades MacPorts base, so --check
+  # gets `sync`, which does only the first half. Same reasoning as rustup
+  # above; unlike rustup, this one is reasoned rather than observed -- the
+  # suite exercises it with stubs, not a real MacPorts install.
+  if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    run_step "port sync" sudo port sync
+  else
+    run_step "port selfupdate" sudo port selfupdate
+  fi
   local outdated
   outdated=$(port outdated 2>/dev/null || true)
   if [[ -z "$outdated" || "$outdated" == *"No installed ports"* ]]; then
@@ -876,7 +891,15 @@ step_nix() {
 
 step_cargo() {
   if command -v rustup >/dev/null 2>&1; then
-    run_step "rustup update" rustup update
+    # `rustup update` installs toolchains -- it is not a metadata refresh, and
+    # a dry run has no business doing it. It did: a --check run reported
+    # "rustup update done" after pulling down a new nightly. `rustup check`
+    # answers the same question and writes nothing.
+    if [[ "$CHECK_ONLY" -eq 1 ]]; then
+      run_step "rustup check" rustup check
+    else
+      run_step "rustup update" rustup update
+    fi
   fi
   if cargo install --list 2>/dev/null | grep -q .; then
     if command -v cargo-install-update >/dev/null 2>&1; then
@@ -1315,7 +1338,11 @@ Options:
                      flag (--noconfirm, -y, --non-interactive...). Nothing
                      stops for input, including package removals and AUR
                      PKGBUILD review. Only for sources you fully trust.
-  -c, --check       Dry run: only show what is pending, change nothing.
+  -c, --check       Dry run: show what is pending, install nothing. Package
+                     *indexes* are still refreshed where a manager cannot
+                     answer without it (apt-get update, brew update, zypper
+                     refresh, apk update, pkg update); pacman is queried
+                     through checkupdates, which uses a temporary database.
   --clean           Also clean the package cache, with confirmation.
   --orphans         Also remove orphaned packages, with confirmation.
   --firmware        Also check/apply firmware updates via fwupdmgr.

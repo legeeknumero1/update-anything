@@ -596,19 +596,46 @@ test_yes_announces_what_it_waives() {
     drop_sandbox
 }
 
-test_log_written() {
-    describe "state: a log is written for every run" || return 0
-    local home
-    home="$(new_sandbox)"; mkdir -p "$home/tmp"
-    run_in "$home" --version >/dev/null 2>&1
+test_check_never_installs_a_toolchain() {
+    describe "safety: --check asks rustup, it does not update it" || return 0
+    local home calls
+    home="$(new_sandbox cargo rustup)"; mkdir -p "$home/tmp"
 
-    local logs
-    logs="$(find "$home/.local/share/update-anything/logs" -name 'update-*.log' 2>/dev/null | wc -l)"
-    if [ "$logs" -ge 1 ]; then
-        pass "even --version leaves a log behind"
-    else
-        fail "no log was written"
-    fi
+    run_in "$home" --check >/dev/null 2>&1
+    calls="$(calls_in "$home")"
+
+    # A real --check run installed a new Rust nightly and reported it as
+    # "rustup update done". The dry run had no rustup stub on PATH, so the
+    # suite had never seen this path at all.
+    assert_contains "$calls" "rustup check" "the read-only query runs instead"
+    assert_absent_from "$calls" "rustup update" "nothing is installed by a dry run"
+    drop_sandbox
+}
+
+test_version_leaves_no_log_behind() {
+    describe "hygiene: --version writes nothing to the log directory" || return 0
+    local home out logs
+    home="$(new_sandbox)"; mkdir -p "$home/tmp"
+
+    out="$(run_in "$home" --version 2>&1)"
+    logs="$(find "$home/.local/share/update-anything/logs" -name 'update-*.log' 2>/dev/null | wc -l | tr -d ' ')"
+
+    assert_eq "$logs" "0" "no log file is left behind"
+    assert_absent_from "$out" "Full log" "and none is announced"
+    drop_sandbox
+}
+
+test_log_written() {
+    describe "state: a run leaves a log behind" || return 0
+    local home log
+    home="$(new_sandbox pacman)"; mkdir -p "$home/tmp"
+    run_in "$home" --check >/dev/null 2>&1
+
+    # Was asserted with --version, which is exactly the case that should
+    # *not* write one -- see test_version_leaves_no_log_behind.
+    log="$(find "$home/.local/share/update-anything/logs" -name 'update-*.log' 2>/dev/null | head -1)"
+    assert_exists "$log" "the run wrote a log"
+    assert_contains "$(cat "$log" 2>/dev/null)" "Pre-flight checks" "and it records what happened"
     drop_sandbox
 }
 
@@ -839,6 +866,8 @@ main() {
     test_yes_is_fully_unattended
     test_without_yes_managers_keep_their_prompts
     test_yes_announces_what_it_waives
+    test_check_never_installs_a_toolchain
+    test_version_leaves_no_log_behind
     test_log_written
     test_snapshot_before_changes
     test_config_is_honoured
