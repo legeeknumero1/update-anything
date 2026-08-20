@@ -1,7 +1,7 @@
 # Maintainer: legeeknumero1 <enzomaison20@gmail.com>
 
 pkgname=update-anything
-pkgver=1.2.0
+pkgver=1.2.1
 pkgrel=1
 pkgdesc="Update every package manager actually installed, on any Unix, without assuming any of them are present"
 arch=('any')
@@ -29,7 +29,7 @@ optdepends=(
 checkdepends=('shellcheck')
 
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('67d68dd5d4e8cb38bc027620a637f08dd4fcfe513544a196d18a2d8c6fb3d7b8')
+sha256sums=('fe76a0dbcd15d5296dd5ffa1fe29de60f3c469313fe6964a517c553df5ec79a5')
 
 check() {
   cd "$srcdir/$pkgname-$pkgver" || exit 1
