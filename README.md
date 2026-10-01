@@ -33,6 +33,15 @@ Flatpak   Snap   Nix   cargo (via cargo-binstall when present)   uv
 pnpm   bun   npm (global)   pipx
 ```
 
+Nix means whatever "updating" is for that install: on NixOS and nix-darwin,
+the system flake's inputs are updated and the system rebuilt (`nixos-rebuild`
+/ `darwin-rebuild switch`, restoring the old `flake.lock` if the new one does
+not build); a standalone home-manager is switched; user channels and `nix-env`
+packages are upgraded only where they exist. The flake is found in
+`UPDATE_ANYTHING_NIX_FLAKE`, then `NH_FLAKE`, then `/etc/nixos` or
+`/etc/nix-darwin`; without one, a NixOS system is rebuilt with `--upgrade`
+from its channels.
+
 The interesting part of a tool like this is not the list. It is what it refuses
 to do — see [Threat model](#threat-model).
 

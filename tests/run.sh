@@ -72,7 +72,7 @@ assert_exists() { if [ -e "$1" ]; then pass "$2"; else fail "$2 (missing: $1)"; 
 # to reproduce quietly stops existing.
 readonly SANDBOX_UTILS="bash sh date uname df awk sed grep find tee mkdir rmdir rm \
 cat cut head tail wc sort uniq diff hostname sleep kill tr basename dirname \
-mktemp chmod ls printf touch env id xargs true"
+mktemp chmod ls printf touch env id xargs true cp cmp"
 
 # A throwaway HOME plus stub package managers. Each stub appends its arguments
 # to a call log, so a test can assert both that a manager ran and how.
@@ -830,6 +830,70 @@ test_no_hardcoded_home() {
     assert_eq "$hits" "0" "paths are derived, never written literally"
 }
 
+# --- Nix ----------------------------------------------------------------------
+
+# A flake checkout plus the config line pointing at it, and a nix stub that
+# records where it ran and rewrites the lock the way `nix flake update` would.
+nix_flake_sandbox() {
+    local home="$1"
+    mkdir -p "$home/tmp" "$home/flake" "$home/.config/update-anything"
+    : > "$home/flake/flake.nix"
+    echo "old" > "$home/flake/flake.lock"
+    echo "UPDATE_ANYTHING_NIX_FLAKE=\"$home/flake#host\"" > "$home/.config/update-anything/config"
+    cat > "$home/bin/nix" <<EOF
+#!/bin/sh
+echo "nix \$* (in \$(pwd))" >> "$home/calls.log"
+echo "new" > flake.lock
+exit 0
+EOF
+    chmod +x "$home/bin/nix"
+}
+
+test_nix_system_is_rebuilt_from_its_flake() {
+    describe "nix: a flake-managed system is updated and rebuilt, not nix-env'd" || return 0
+    local home calls
+    home="$(new_sandbox darwin-rebuild home-manager nix-channel nix-env)"
+    nix_flake_sandbox "$home"
+
+    run_in "$home" --yes >/dev/null 2>&1
+    calls="$(calls_in "$home")"
+
+    # The bug this guards: on a NixOS flake with home-manager as a module the
+    # step ran a standalone `home-manager switch` (no configuration, fails)
+    # and never rebuilt the system at all.
+    assert_contains "$calls" "flake update (in $home/flake)" "the flake inputs are updated in the checkout"
+    assert_contains "$calls" "sudo darwin-rebuild switch --flake $home/flake#host" "the system is rebuilt from the flake"
+    assert_absent_from "$calls" "home-manager switch" "a module home-manager is left to the system rebuild"
+    assert_absent_from "$calls" "nix-env -u" "an empty nix-env profile is not upgraded"
+    assert_absent_from "$calls" "nix-channel --update" "absent channels are not updated"
+    drop_sandbox
+}
+
+test_nix_lock_restored_when_rebuild_fails() {
+    describe "nix: inputs that do not build are not left in flake.lock" || return 0
+    local home
+    home="$(new_sandbox)"
+    nix_flake_sandbox "$home"
+    printf '#!/bin/sh\necho "darwin-rebuild $*" >> "%s/calls.log"\nexit 1\n' "$home" > "$home/bin/darwin-rebuild"
+    chmod +x "$home/bin/darwin-rebuild"
+
+    run_in "$home" --yes >/dev/null 2>&1
+    assert_eq "$(cat "$home/flake/flake.lock")" "old" "the previous lock is back"
+    drop_sandbox
+}
+
+test_nix_standalone_home_manager_still_switched() {
+    describe "nix: a standalone home-manager is still switched" || return 0
+    local home calls
+    home="$(new_sandbox home-manager)"; mkdir -p "$home/tmp" "$home/.config/home-manager"
+    : > "$home/.config/home-manager/home.nix"
+
+    run_in "$home" --yes >/dev/null 2>&1
+    calls="$(calls_in "$home")"
+    assert_contains "$calls" "home-manager switch" "home-manager switch runs"
+    drop_sandbox
+}
+
 # --- Runner -----------------------------------------------------------------
 
 main() {
@@ -876,6 +940,9 @@ main() {
     test_folded_list_is_complete_in_the_log
     test_config_only_list_is_honoured
     test_config_quiet_is_honoured
+    test_nix_system_is_rebuilt_from_its_flake
+    test_nix_lock_restored_when_rebuild_fails
+    test_nix_standalone_home_manager_still_switched
     test_bash32_compatible
     test_no_hardcoded_home
 

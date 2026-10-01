@@ -876,15 +876,134 @@ step_snap() {
   run_step "Snap refresh" sudo snap refresh
 }
 
-step_nix() {
-  [[ "$CHECK_ONLY" -eq 1 ]] && {
-    info "nix: preview not cheap to compute; use --yes to update."
+# Where the system configuration lives, as a flake reference, or empty for a
+# channel-based system. UPDATE_ANYTHING_NIX_FLAKE wins (environment or
+# config file); NH_FLAKE is what nh(1) users already export; /etc/nixos and
+# /etc/nix-darwin are where both projects put a flake by default. A trailing
+# "#host" is kept and passed through to the rebuild.
+nix_system_flake() {
+  local ref
+  for ref in "${UPDATE_ANYTHING_NIX_FLAKE:-}" "${NH_FLAKE:-}"; do
+    [[ -n "$ref" ]] && {
+      echo "$ref"
+      return 0
+    }
+  done
+  if [[ -f /etc/NIXOS && -f /etc/nixos/flake.nix ]]; then
+    echo /etc/nixos
+  elif command -v darwin-rebuild >/dev/null 2>&1 && [[ -f /etc/nix-darwin/flake.nix ]]; then
+    echo /etc/nix-darwin
+  fi
+}
+
+# `nix flake update` from inside the checkout rather than with --flake: the
+# flag only exists since Nix 2.19 (before it, the positional argument was the
+# flake; after it, an input name), and Lix kept the old form. The current
+# directory is the one spelling every version agrees on.
+nix_flake_update_in() {
+  (cd "$1" && nix --extra-experimental-features 'nix-command flakes' flake update)
+}
+
+# NixOS and nix-darwin are updated by bumping the inputs and rebuilding the
+# system -- `nix-channel --update` and `nix-env -u` touch neither. A flake
+# lock that then fails to build is put back, so a broken nixpkgs revision
+# never stays pinned behind a "failed" line nobody reads twice.
+nix_system_update() {
+  local rebuild="$1" flake dir lock backup="" rc=0
+  flake=$(nix_system_flake)
+
+  if [[ -z "$flake" ]]; then
+    confirm "Upgrade channels and rebuild the system with 'sudo $rebuild switch --upgrade'?" || {
+      warn "Skipped $rebuild by user choice."
+      return 0
+    }
+    if [[ "$rebuild" == "nixos-rebuild" ]]; then
+      run_step "$rebuild switch --upgrade" sudo nixos-rebuild switch --upgrade
+    else
+      # darwin-rebuild has no --upgrade; root's channels are what it reads.
+      run_step "Nix channel update (root)" sudo nix-channel --update
+      run_step "$rebuild switch" sudo darwin-rebuild switch
+    fi
+    return 0
+  fi
+
+  dir="${flake%%#*}"
+  confirm "Update the inputs of $flake and rebuild with 'sudo $rebuild switch'?" || {
+    warn "Skipped $rebuild by user choice."
     return 0
   }
-  if command -v home-manager >/dev/null 2>&1; then
+
+  # Only a local checkout has a lock this script can update; a remote
+  # reference (github:..., git+https:...) is rebuilt at whatever it pins.
+  if [[ -f "$dir/flake.nix" ]]; then
+    lock="$dir/flake.lock"
+    if [[ -f "$lock" ]]; then
+      backup=$(mktemp "${TMPDIR:-/tmp}/${SCRIPT_NAME}-flake.lock.XXXXXX") || backup=""
+      if [[ -n "$backup" ]] && ! cp -p "$lock" "$backup"; then
+        rm -f "$backup"
+        backup=""
+      fi
+    fi
+    if [[ -w "$dir" && (! -e "$lock" || -w "$lock") ]]; then
+      run_step "Nix flake update ($dir)" nix_flake_update_in "$dir" || rc=1
+    else
+      run_step "Nix flake update ($dir)" sudo bash -c "cd \"\$1\" && nix --extra-experimental-features 'nix-command flakes' flake update" _ "$dir" || rc=1
+    fi
+  fi
+
+  if [[ "$rc" -eq 0 ]]; then
+    run_step "$rebuild switch --flake $flake" sudo "$rebuild" switch --flake "$flake" || rc=1
+  fi
+
+  if [[ "$rc" -ne 0 && -n "$backup" ]] && ! cmp -s "$backup" "$lock"; then
+    warn "Restoring $lock: the updated inputs did not build."
+    cp -p "$backup" "$lock" 2>/dev/null || sudo cp -p "$backup" "$lock"
+  fi
+  [[ -n "$backup" ]] && rm -f "$backup"
+  return 0
+}
+
+# A home-manager that is a NixOS/nix-darwin module has no configuration of
+# its own -- `home-manager switch` just fails with "No configuration file
+# found" -- and the system rebuild above already switched it. Only a
+# standalone install is switched separately.
+home_manager_is_standalone() {
+  local d="${XDG_CONFIG_HOME:-$HOME/.config}"
+  [[ -f "$d/home-manager/home.nix" || -f "$d/home-manager/flake.nix" || -f "$d/nixpkgs/home.nix" ]]
+}
+
+step_nix() {
+  local rebuild=""
+  if [[ -f /etc/NIXOS ]] && command -v nixos-rebuild >/dev/null 2>&1; then
+    rebuild="nixos-rebuild"
+  elif command -v darwin-rebuild >/dev/null 2>&1; then
+    rebuild="darwin-rebuild"
+  fi
+
+  [[ "$CHECK_ONLY" -eq 1 ]] && {
+    if [[ -n "$rebuild" ]]; then
+      local flake
+      flake=$(nix_system_flake)
+      info "nix: preview not cheap to compute; a real run updates ${flake:-the channels} and runs '$rebuild switch'."
+    else
+      info "nix: preview not cheap to compute; run without --check to update."
+    fi
+    return 0
+  }
+
+  [[ -n "$rebuild" ]] && nix_system_update "$rebuild"
+
+  if command -v home-manager >/dev/null 2>&1 && home_manager_is_standalone; then
     run_step "Nix (home-manager)" home-manager switch
-  else
+  fi
+
+  # Per-user state, outside any system configuration: only touched when it
+  # exists, so a declarative system does not grow a "failed" step for
+  # channels and nix-env packages it never had.
+  if command -v nix-channel >/dev/null 2>&1 && [[ -n "$(nix-channel --list 2>/dev/null)" ]]; then
     run_step "Nix channel update" nix-channel --update
+  fi
+  if command -v nix-env >/dev/null 2>&1 && [[ -n "$(nix-env -q 2>/dev/null)" ]]; then
     run_step "Nix env upgrade" nix-env -u '*'
   fi
 }
@@ -986,7 +1105,10 @@ register_managers() {
   # Universal / cross-distro managers
   command -v flatpak >/dev/null 2>&1 && MANAGERS+=("flatpak")
   command -v snap >/dev/null 2>&1 && MANAGERS+=("snap")
-  { command -v nix-channel >/dev/null 2>&1 || command -v home-manager >/dev/null 2>&1; } && MANAGERS+=("nix")
+  # nix-channel alone is not enough: a flake-only NixOS (nix.channel.enable =
+  # false) has none, and its only update path is nixos-rebuild.
+  { command -v nix-channel >/dev/null 2>&1 || command -v home-manager >/dev/null 2>&1 ||
+    command -v nixos-rebuild >/dev/null 2>&1 || command -v darwin-rebuild >/dev/null 2>&1; } && MANAGERS+=("nix")
 
   # brew is registered after every manager that needs sudo, and never before
   # one: it drops the sudo ticket on each invocation, so `snap refresh` or
