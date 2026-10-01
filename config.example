@@ -58,6 +58,11 @@
 # Never touch these managers. Same " name " spacing rule.
 # SKIP_LIST=" snap brew "
 
+# NixOS / nix-darwin: the flake the system is built from, when it is not in
+# /etc/nixos or /etc/nix-darwin (NH_FLAKE is honoured too). Its inputs are
+# updated and the system rebuilt; append "#host" to pick the configuration.
+# UPDATE_ANYTHING_NIX_FLAKE="$HOME/nix-dotfiles"
+
 # Send a one-line status ping (hostname + outcome) to a Discord/Slack-style
 # webhook at the end of every run. Unset by default -- nothing is ever
 # sent anywhere unless you set this yourself.

@@ -3,6 +3,30 @@
 Notable changes, newest first. Follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **NixOS and nix-darwin were never actually updated.** The Nix step ran
+  `home-manager switch` whenever the `home-manager` command existed — and
+  with home-manager as a NixOS module (`programs.home-manager.enable`), it
+  does exist but has no configuration of its own, so the step failed with
+  "No configuration file found". Without home-manager it fell back to
+  `nix-channel --update` and `nix-env -u`, neither of which touches the
+  system. The step now updates the system flake's inputs and runs
+  `nixos-rebuild` / `darwin-rebuild switch` (channel-based NixOS: `switch
+  --upgrade`), puts the previous `flake.lock` back if the new inputs do not
+  build, switches home-manager only when it is a standalone install, and
+  touches channels and `nix-env` only when the user has any.
+- A flake-only NixOS without `nix-channel` (`nix.channel.enable = false`)
+  was not detected as having Nix at all.
+
+### Added
+
+- `UPDATE_ANYTHING_NIX_FLAKE` (environment or config file) names the
+  system flake when it is not in `/etc/nixos` or `/etc/nix-darwin`;
+  `NH_FLAKE` is used when it is unset.
+
 ## [1.2.1] — 2026-08-20
 
 ### Fixed
