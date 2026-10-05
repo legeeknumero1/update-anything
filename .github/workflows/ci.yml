@@ -6,12 +6,21 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   shellcheck:
     name: ShellCheck
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # Pinned rather than taken from the runner image. ShellCheck's checks
       # change between releases — an older one reports SC2317 where a newer one
@@ -38,7 +47,9 @@ jobs:
     name: Syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Parse every script
         run: |
           for f in update-anything.sh install.sh tests/run.sh; do
@@ -55,7 +66,9 @@ jobs:
         # because that is what macOS ships, and only a macOS runner proves it.
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Run the test suite
         run: NO_COLOR=1 ./tests/run.sh
 
@@ -63,7 +76,9 @@ jobs:
     name: Portability
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # The script promises to run on macOS, which ships bash 3.2. These four
       # constructs are the usual way a script silently stops working there.

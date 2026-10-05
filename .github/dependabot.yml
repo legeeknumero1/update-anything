@@ -9,3 +9,7 @@ updates:
       interval: monthly
     commit-message:
       prefix: "ci"
+    # A release younger than a week has not been vetted by anyone yet;
+    # hijacked action tags are typically caught within days.
+    cooldown:
+      default-days: 7
