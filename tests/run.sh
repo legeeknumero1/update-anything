@@ -905,6 +905,7 @@ test_dnf_pending_updates_are_not_a_failure() {
     describe "dnf: check-update exiting 100 is an answer, not a failed step" || return 0
     local home output
     home="$(new_sandbox dnf)"
+    mkdir -p "$home/tmp"
     cat > "$home/bin/dnf" <<EOF
 #!/bin/sh
 echo "dnf \$*" >> "$home/calls.log"
@@ -914,15 +915,38 @@ EOF
     chmod +x "$home/bin/dnf"
 
     output="$(run_in "$home" --check --only dnf 2>&1)"
+    assert_contains "$output" "dnf check-update done" "the step ran and passed"
     assert_absent_from "$output" "failed" "pending updates do not fail the run"
     assert_absent_from "$(calls_in "$home")" "sudo dnf" "a dry run needs no sudo"
+    drop_sandbox
+}
+
+test_dnf_holds_are_listed_by_name() {
+    describe "dnf: holds are package names, not dnf5's raw records" || return 0
+    local home output
+    home="$(new_sandbox dnf)"
+    mkdir -p "$home/tmp"
+    cat > "$home/bin/dnf" <<EOF
+#!/bin/sh
+echo "dnf \$*" >> "$home/calls.log"
+if [ "\$1" = versionlock ]; then
+    printf '# reason\\nPackage name: kernel\\nevr < 7.3\\n\\n# reason\\nPackage name: zfs\\nevr < 2.5\\n'
+fi
+exit 0
+EOF
+    chmod +x "$home/bin/dnf"
+
+    output="$(run_in "$home" --check --only dnf 2>&1)"
+    assert_contains "$output" "dnf holds (versionlock): kernel zfs" "only the names are shown"
+    assert_absent_from "$output" "evr <" "the conditions stay out of the terminal"
     drop_sandbox
 }
 
 test_nix_home_manager_profile_is_left_alone() {
     describe "nix: home-manager-path is not upgraded through nix-env" || return 0
     local home
-    home="$(new_sandbox nix-env)"
+    home="$(new_sandbox nix-env nix-channel)"
+    mkdir -p "$home/tmp"
     cat > "$home/bin/nix-env" <<EOF
 #!/bin/sh
 echo "nix-env \$*" >> "$home/calls.log"
@@ -932,6 +956,7 @@ EOF
     chmod +x "$home/bin/nix-env"
 
     run_in "$home" --yes >/dev/null 2>&1
+    assert_contains "$(calls_in "$home")" "nix-env -q" "the profile was inspected"
     assert_absent_from "$(calls_in "$home")" "nix-env -u" "Home Manager's profile is not touched"
     drop_sandbox
 }
@@ -1000,6 +1025,7 @@ main() {
     test_nix_command_replaces_the_step
     test_dnf_pending_updates_are_not_a_failure
     test_nix_home_manager_profile_is_left_alone
+    test_dnf_holds_are_listed_by_name
     test_bash32_compatible
     test_no_hardcoded_home
 

@@ -220,7 +220,10 @@ report_holds() {
   fi
 
   if ! is_skipped dnf && command -v dnf >/dev/null 2>&1; then
-    held=$(dnf versionlock list 2>/dev/null | grep -v '^Last metadata' | tr '\n' ' ')
+    # dnf5 prints a comment and conditions around each name; dnf4 prints one
+    # package spec per line.
+    held=$(dnf versionlock list 2>/dev/null | sed -e '/^Last metadata/d' -e '/^#/d' -e '/^[[:space:]]*$/d' -e '/^evr /d' \
+      -e 's/^Package name: //' | tr '\n' ' ')
     [[ -n "$held" ]] && {
       info "dnf holds (versionlock): $held"
       found=1
