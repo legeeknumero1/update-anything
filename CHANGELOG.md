@@ -20,6 +20,12 @@ and [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   touches channels and `nix-env` only when the user has any.
 - A flake-only NixOS without `nix-channel` (`nix.channel.enable = false`)
   was not detected as having Nix at all.
+- The distribution was not detected on any `os-release` that sets `VERSION`:
+  sourcing it collided with this script's readonly `VERSION`.
+- `--check` reported dnf and yum as failed whenever updates were pending
+  (`check-update` exits 100), and asked for sudo it does not need.
+- `nix-env -u` no longer targets Home Manager's `home-manager-path`.
+- `--snapshot` no longer fails on a snapper install without a `root` config.
 
 ### Added
 

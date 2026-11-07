@@ -40,7 +40,10 @@ not build); a standalone home-manager is switched; user channels and `nix-env`
 packages are upgraded only where they exist. The flake is found in
 `UPDATE_ANYTHING_NIX_FLAKE`, then `NH_FLAKE`, then `/etc/nixos` or
 `/etc/nix-darwin`; without one, a NixOS system is rebuilt with `--upgrade`
-from its channels.
+from its channels. A flake-driven system that is neither (home-manager on
+another distribution, say) sets `UPDATE_ANYTHING_NIX_COMMAND`: that command
+replaces the whole Nix step, and receives `--check` on a dry run and `--yes`
+on an unattended one.
 
 The interesting part of a tool like this is not the list. It is what it refuses
 to do — see [Threat model](#threat-model).

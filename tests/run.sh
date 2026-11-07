@@ -882,6 +882,60 @@ test_nix_lock_restored_when_rebuild_fails() {
     drop_sandbox
 }
 
+test_nix_command_replaces_the_step() {
+    describe "nix: UPDATE_ANYTHING_NIX_COMMAND owns the step and hears --check" || return 0
+    local home calls
+    home="$(new_sandbox my-update darwin-rebuild)"
+    nix_flake_sandbox "$home"
+    echo "UPDATE_ANYTHING_NIX_COMMAND=my-update" >> "$home/.config/update-anything/config"
+
+    run_in "$home" --check >/dev/null 2>&1
+    calls="$(calls_in "$home")"
+    assert_contains "$calls" "my-update --check" "a dry run passes --check"
+    assert_absent_from "$calls" "darwin-rebuild" "a dry run rebuilds nothing"
+
+    run_in "$home" --yes >/dev/null 2>&1
+    calls="$(calls_in "$home")"
+    assert_contains "$calls" "my-update --yes" "an unattended run passes --yes"
+    assert_absent_from "$calls" "darwin-rebuild switch" "the command replaces the rebuild"
+    drop_sandbox
+}
+
+test_dnf_pending_updates_are_not_a_failure() {
+    describe "dnf: check-update exiting 100 is an answer, not a failed step" || return 0
+    local home output
+    home="$(new_sandbox dnf)"
+    cat > "$home/bin/dnf" <<EOF
+#!/bin/sh
+echo "dnf \$*" >> "$home/calls.log"
+[ "\$1" = check-update ] && exit 100
+exit 0
+EOF
+    chmod +x "$home/bin/dnf"
+
+    output="$(run_in "$home" --check --only dnf 2>&1)"
+    assert_absent_from "$output" "failed" "pending updates do not fail the run"
+    assert_absent_from "$(calls_in "$home")" "sudo dnf" "a dry run needs no sudo"
+    drop_sandbox
+}
+
+test_nix_home_manager_profile_is_left_alone() {
+    describe "nix: home-manager-path is not upgraded through nix-env" || return 0
+    local home
+    home="$(new_sandbox nix-env)"
+    cat > "$home/bin/nix-env" <<EOF
+#!/bin/sh
+echo "nix-env \$*" >> "$home/calls.log"
+[ "\$1" = -q ] && echo home-manager-path
+exit 0
+EOF
+    chmod +x "$home/bin/nix-env"
+
+    run_in "$home" --yes >/dev/null 2>&1
+    assert_absent_from "$(calls_in "$home")" "nix-env -u" "Home Manager's profile is not touched"
+    drop_sandbox
+}
+
 test_nix_standalone_home_manager_still_switched() {
     describe "nix: a standalone home-manager is still switched" || return 0
     local home calls
@@ -943,6 +997,9 @@ main() {
     test_nix_system_is_rebuilt_from_its_flake
     test_nix_lock_restored_when_rebuild_fails
     test_nix_standalone_home_manager_still_switched
+    test_nix_command_replaces_the_step
+    test_dnf_pending_updates_are_not_a_failure
+    test_nix_home_manager_profile_is_left_alone
     test_bash32_compatible
     test_no_hardcoded_home
 

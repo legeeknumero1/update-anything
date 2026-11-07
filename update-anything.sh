@@ -338,8 +338,9 @@ detect_os() {
   case "$OS_KERNEL" in
   Linux)
     if [[ -r /etc/os-release ]]; then
-      # shellcheck disable=SC1091
-      OS_FAMILY="$(. /etc/os-release && echo "$ID")"
+      # Read, not sourced: os-release sets VERSION on most distributions, and
+      # this script's own readonly VERSION makes sourcing it abort before ID.
+      OS_FAMILY="$(sed -n 's/^ID=//p' /etc/os-release | tr -d "\"'")"
     else
       OS_FAMILY="linux"
     fi
@@ -710,10 +711,19 @@ step_apt() {
   run_step "apt-get full-upgrade" "${cmd[@]}"
 }
 
+# dnf and yum answer `check-update` with exit code 100 when updates are
+# pending. That is the answer to the question, not a failed step.
+pending_is_success() {
+  local rc=0
+  "$@" || rc=$?
+  [[ "$rc" -eq 100 ]] && return 0
+  return "$rc"
+}
+
 step_dnf() {
   info "Checking dnf updates..."
   [[ "$CHECK_ONLY" -eq 1 ]] && {
-    run_step "dnf check-update" sudo dnf check-update
+    run_step "dnf check-update" pending_is_success dnf check-update
     return 0
   }
   confirm "Check and apply dnf updates ('sudo dnf upgrade')?" || {
@@ -729,7 +739,7 @@ step_yum() {
   command -v dnf >/dev/null 2>&1 && return 0 # dnf supersedes yum, avoid running both
   info "Checking yum updates..."
   [[ "$CHECK_ONLY" -eq 1 ]] && {
-    run_step "yum check-update" sudo yum check-update
+    run_step "yum check-update" pending_is_success yum check-update
     return 0
   }
   confirm "Check and apply yum updates ('sudo yum update')?" || {
@@ -972,7 +982,33 @@ home_manager_is_standalone() {
   [[ -f "$d/home-manager/home.nix" || -f "$d/home-manager/flake.nix" || -f "$d/nixpkgs/home.nix" ]]
 }
 
+# A flake-driven system that is neither NixOS nor nix-darwin (home-manager on
+# Fedora, say) has no rebuild command this script could know about, so the
+# user names one. It owns the whole job, lock handling included, and is told
+# --check on a dry run and --yes on an unattended one.
+nix_custom_update() {
+  local custom="$UPDATE_ANYTHING_NIX_COMMAND"
+  if [[ "$CHECK_ONLY" -eq 1 ]]; then
+    run_step "Nix ($custom --check)" "$custom" --check
+    return 0
+  fi
+  confirm "Update the Nix configuration with '$custom'?" || {
+    warn "Skipped $custom by user choice."
+    return 0
+  }
+  if [[ "$ASSUME_YES" -eq 1 ]]; then
+    run_step "Nix ($custom)" "$custom" --yes
+  else
+    run_step "Nix ($custom)" "$custom"
+  fi
+}
+
 step_nix() {
+  if [[ -n "${UPDATE_ANYTHING_NIX_COMMAND:-}" ]]; then
+    nix_custom_update
+    return 0
+  fi
+
   local rebuild=""
   if [[ -f /etc/NIXOS ]] && command -v nixos-rebuild >/dev/null 2>&1; then
     rebuild="nixos-rebuild"
@@ -1003,7 +1039,9 @@ step_nix() {
   if command -v nix-channel >/dev/null 2>&1 && [[ -n "$(nix-channel --list 2>/dev/null)" ]]; then
     run_step "Nix channel update" nix-channel --update
   fi
-  if command -v nix-env >/dev/null 2>&1 && [[ -n "$(nix-env -q 2>/dev/null)" ]]; then
+  # home-manager-path is Home Manager's own generation, not a nix-env package:
+  # upgrading it by name would replace it with whatever a channel offers.
+  if command -v nix-env >/dev/null 2>&1 && nix-env -q 2>/dev/null | grep -vx 'home-manager-path' >/dev/null; then
     run_step "Nix env upgrade" nix-env -u '*'
   fi
 }
@@ -1107,7 +1145,8 @@ register_managers() {
   command -v snap >/dev/null 2>&1 && MANAGERS+=("snap")
   # nix-channel alone is not enough: a flake-only NixOS (nix.channel.enable =
   # false) has none, and its only update path is nixos-rebuild.
-  { command -v nix-channel >/dev/null 2>&1 || command -v home-manager >/dev/null 2>&1 ||
+  { [[ -n "${UPDATE_ANYTHING_NIX_COMMAND:-}" ]] ||
+    command -v nix-channel >/dev/null 2>&1 || command -v home-manager >/dev/null 2>&1 ||
     command -v nixos-rebuild >/dev/null 2>&1 || command -v darwin-rebuild >/dev/null 2>&1; } && MANAGERS+=("nix")
 
   # brew is registered after every manager that needs sudo, and never before
@@ -1259,6 +1298,13 @@ check_reboot_needed() {
     warn "A kernel update was applied. Reboot required to switch to the new kernel."
   fi
   [[ -f /var/run/reboot-required ]] && warn "/var/run/reboot-required exists (Debian/Ubuntu flag). Reboot recommended."
+  # Exit 1 means a reboot is recommended; anything else is not an answer.
+  if command -v dnf >/dev/null 2>&1; then
+    local restart_rc=0
+    dnf needs-restarting -r >/dev/null 2>&1 || restart_rc=$?
+    [[ "$restart_rc" -eq 1 ]] && warn "dnf needs-restarting: a core package changed since boot. Reboot recommended."
+  fi
+  return 0
 }
 
 check_services_to_restart() {
@@ -1293,7 +1339,9 @@ check_services_to_restart() {
 step_system_snapshot() {
   [[ "$DO_SNAPSHOT" -eq 1 ]] || return 0
   section "System snapshot"
-  if command -v snapper >/dev/null 2>&1; then
+  # snapper's default config is "root". A machine that only snapshots /home has
+  # none, and a /home snapshot would not undo a system update anyway.
+  if command -v snapper >/dev/null 2>&1 && [[ -f /etc/snapper/configs/root ]]; then
     confirm "Create a snapper snapshot before updating?" &&
       run_step "Snapper snapshot" sudo snapper create --description "pre-update-anything-${TIMESTAMP}"
   elif command -v timeshift >/dev/null 2>&1; then

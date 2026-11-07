@@ -63,6 +63,11 @@
 # updated and the system rebuilt; append "#host" to pick the configuration.
 # UPDATE_ANYTHING_NIX_FLAKE="$HOME/nix-dotfiles"
 
+# A flake-driven system that is neither NixOS nor nix-darwin: this command
+# replaces the whole Nix step. It receives --check on a dry run and --yes on
+# an unattended run.
+# UPDATE_ANYTHING_NIX_COMMAND="$HOME/.local/bin/my-system-update"
+
 # Send a one-line status ping (hostname + outcome) to a Discord/Slack-style
 # webhook at the end of every run. Unset by default -- nothing is ever
 # sent anywhere unless you set this yourself.
